@@ -10,7 +10,8 @@ import os
 # Database URL from environment variables
 DATABASE_URL = config(
     "DATABASE_URL", 
-    default="postgresql://postgres:password@localhost:5432/real_estate_db"
+    # To be deleted or changed for production
+    default="postgresql://inangara:pass@localhost:5433/prod_real_estate_db"
 )
 
 # Create SQLAlchemy engine
