@@ -4,70 +4,84 @@ User routes
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
 
 from app.utils.database import get_db
-from app.schemas.user import UserResponse, UserUpdate
+from app.schemas.user import UserOut, UserUpdate
 from app.services.user_service import UserService
-from app.services.auth_service import AuthService
-from app.routes.auth import oauth2_scheme
+from app.dependencies.user_dependencies import get_current_user
+from app.models.user import User
 
 router = APIRouter()
 
-def get_current_user_email(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    """Get current user email from token"""
-    auth_service = AuthService(db)
-    return auth_service.verify_token(token)
-
-@router.get("/me", response_model=UserResponse)
-async def get_current_user(
-    current_user_email: str = Depends(get_current_user_email),
-    db: Session = Depends(get_db)
+@router.get(
+    "/me",
+    response_model=UserOut,
+    response_model_exclude_none=True,
+    summary="Get current user profile",
+    response_description="Profile information of the authenticated user."
+)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user)
 ):
-    """Get current user profile"""
-    user_service = UserService(db)
-    user = user_service.get_user_by_email(current_user_email)
+    """
+    Retrieve the profile information of the authenticated user.
     
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    return user
+    Returns the user's profile data including personal information and preferences.
+    """
+    return current_user
 
-@router.put("/me", response_model=UserResponse)
+@router.put(
+    "/me",
+    response_model=UserOut,
+    response_model_exclude_none=True,
+    summary="Update user profile",
+    response_description="The updated user profile."
+)
 async def update_current_user(
     user_data: UserUpdate,
-    current_user_email: str = Depends(get_current_user_email),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update current user profile"""
+    """
+    Update the profile information of the authenticated user.
+    
+    - **first_name**: User's first name
+    - **last_name**: User's last name
+    - **phone**: Contact phone number
+    - **profile_image_url**: URL to profile image
+    - **company_name**: Company name (for agents)
+    - **license_number**: Real estate license number
+    - **bio**: User biography
+    - **preferred_locations**: List of preferred locations
+    - **budget_min**: Minimum budget preference
+    - **budget_max**: Maximum budget preference
+    - **property_preferences**: Property preference settings
+    - **roles**: List of user roles
+    """
     user_service = UserService(db)
-    user = user_service.get_user_by_email(current_user_email)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    updated_user = user_service.update_user(user.id, user_data)
+    updated_user = user_service.update_user(current_user.id, user_data)
     return updated_user
 
-@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Deactivate user account",
+    response_description="The user account has been successfully deactivated."
+)
 async def deactivate_current_user(
-    current_user_email: str = Depends(get_current_user_email),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Deactivate current user account"""
+    """
+    Deactivate the authenticated user's account.
+    
+    This performs a soft delete - the account is deactivated but data is preserved.
+    The user will no longer be able to log in.
+    """
     user_service = UserService(db)
-    user = user_service.get_user_by_email(current_user_email)
-    
-    if not user:
+    success = user_service.deactivate_user(current_user.id)
+    if not success:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to deactivate account"
         )
-    
-    user_service.deactivate_user(user.id)

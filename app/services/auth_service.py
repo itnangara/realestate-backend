@@ -14,8 +14,8 @@ SECRET_KEY = config("SECRET_KEY", default="your-secret-key-change-in-production"
 ALGORITHM = config("ALGORITHM", default="HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(config("ACCESS_TOKEN_EXPIRE_MINUTES", default="30"))
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing - use argon2 only (clean, modern setup)
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 class AuthService:
     """Authentication service class"""

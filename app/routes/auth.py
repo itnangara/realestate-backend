@@ -9,16 +9,16 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from app.utils.database import get_db
-from app.schemas.user import UserCreate, UserResponse, Token, UserLogin
+from app.schemas.user import UserCreate, UserOut, Token, UserLogin
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
 
 router = APIRouter()
 
 # OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def register_user(
     user_data: UserCreate,
     db: Session = Depends(get_db)
@@ -78,7 +78,7 @@ async def login_user(
         "token_type": "bearer"
     }
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=UserOut)
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
