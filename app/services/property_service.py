@@ -24,6 +24,7 @@ class PropertyService:
         limit: int = 20,
         city: Optional[str] = None,
         property_type: Optional[str] = None,
+        status: Optional[str] = None,
         min_price: Optional[float] = None,
         max_price: Optional[float] = None
     ) -> List[Property]:
@@ -36,6 +37,9 @@ class PropertyService:
         
         if property_type:
             query = query.filter(Property.property_type == property_type)
+        
+        if status:
+            query = query.filter(Property.status == status)
         
         if min_price is not None:
             query = query.filter(Property.price >= min_price)
@@ -51,6 +55,9 @@ class PropertyService:
         price_per_sqft = None
         if property_data.price and property_data.square_feet:
             price_per_sqft = property_data.price / property_data.square_feet
+        
+        # Build features array from features field (if provided)
+        features = property_data.features if hasattr(property_data, 'features') and property_data.features else []
         
         # Create property object
         property = Property(
@@ -73,10 +80,7 @@ class PropertyService:
             price=property_data.price,
             rent_price=property_data.rent_price,
             price_per_sqft=price_per_sqft,
-            has_garage=property_data.has_garage,
-            has_pool=property_data.has_pool,
-            has_garden=property_data.has_garden,
-            has_balcony=property_data.has_balcony,
+            features=features if features else None,
             is_furnished=property_data.is_furnished,
             pet_friendly=property_data.pet_friendly,
             owner_id=owner_id
@@ -95,8 +99,10 @@ class PropertyService:
         if not property:
             return None
         
-        # Update fields
-        update_data = property_data.dict(exclude_unset=True)
+        # Update only actual database columns
+        update_data = property_data.model_dump(exclude_unset=True)
+        
+        # Update remaining fields
         for field, value in update_data.items():
             setattr(property, field, value)
         
@@ -169,11 +175,18 @@ class PropertyService:
         if search_filters.get('max_square_feet'):
             query = query.filter(Property.square_feet <= search_filters['max_square_feet'])
         
+        # Filter by features in JSON field
         if search_filters.get('has_garage') is not None:
-            query = query.filter(Property.has_garage == search_filters['has_garage'])
+            if search_filters['has_garage']:
+                query = query.filter(Property.features.contains(['garage']))
+            else:
+                query = query.filter(~Property.features.contains(['garage']))
         
         if search_filters.get('has_pool') is not None:
-            query = query.filter(Property.has_pool == search_filters['has_pool'])
+            if search_filters['has_pool']:
+                query = query.filter(Property.features.contains(['pool']))
+            else:
+                query = query.filter(~Property.features.contains(['pool']))
         
         if search_filters.get('pet_friendly') is not None:
             query = query.filter(Property.pet_friendly == search_filters['pet_friendly'])

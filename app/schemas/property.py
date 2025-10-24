@@ -2,7 +2,7 @@
 Property Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, root_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models.property import PropertyType, PropertyStatus
@@ -34,11 +34,7 @@ class PropertyBase(BaseModel):
     price: Optional[float] = None
     rent_price: Optional[float] = None
     
-    # Features
-    has_garage: bool = False
-    has_pool: bool = False
-    has_garden: bool = False
-    has_balcony: bool = False
+    # Features - only real database columns
     is_furnished: bool = False
     pet_friendly: bool = False
 
@@ -64,10 +60,6 @@ class PropertyUpdate(BaseModel):
     year_built: Optional[int] = None
     price: Optional[float] = None
     rent_price: Optional[float] = None
-    has_garage: Optional[bool] = None
-    has_pool: Optional[bool] = None
-    has_garden: Optional[bool] = None
-    has_balcony: Optional[bool] = None
     is_furnished: Optional[bool] = None
     pet_friendly: Optional[bool] = None
     main_image_url: Optional[str] = None
@@ -86,6 +78,12 @@ class PropertyResponse(PropertyBase):
     agent_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    
+    # Computed properties - automatically read from @property methods
+    has_garage: bool = False
+    has_pool: bool = False
+    has_garden: bool = False
+    has_balcony: bool = False
 
     class Config:
         from_attributes = True
