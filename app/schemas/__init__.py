@@ -3,7 +3,7 @@ Schemas package initialization
 """
 
 from .user import (
-    UserBase, UserCreate, UserUpdate, UserResponse, 
+    UserCreate, UserUpdate, UserOut, 
     UserLogin, Token, TokenData
 )
 from .property import (
@@ -12,15 +12,14 @@ from .property import (
 )
 from .application import (
     ApplicationBase, ApplicationCreate, ApplicationUpdate,
-    ApplicationResponse, ApplicationWithDetails
+    ApplicationResponse, ApplicationDetailResponse
 )
 
 __all__ = [
     # User schemas
-    "UserBase",
     "UserCreate", 
     "UserUpdate",
-    "UserResponse",
+    "UserOut",
     "UserLogin",
     "Token",
     "TokenData",
@@ -37,7 +36,7 @@ __all__ = [
     "ApplicationCreate",
     "ApplicationUpdate",
     "ApplicationResponse", 
-    "ApplicationWithDetails"
+    "ApplicationDetailResponse"
 ]
 
 

@@ -40,7 +40,7 @@ class UserService:
             first_name=user_data.first_name,
             last_name=user_data.last_name,
             phone=user_data.phone,
-            role=user_data.role
+            roles=user_data.roles
         )
         
         # Add to database
@@ -57,7 +57,7 @@ class UserService:
             return None
         
         # Update fields
-        update_data = user_data.dict(exclude_unset=True)
+        update_data = user_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(user, field, value)
         
