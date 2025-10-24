@@ -2,76 +2,68 @@
 Application Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, computed_field, model_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.application import ApplicationStatus
 
 class ApplicationBase(BaseModel):
     """Base application schema"""
-    message: Optional[str] = None
-    move_in_date: Optional[datetime] = None
-    lease_duration: Optional[int] = None  # in months
-    annual_income: Optional[int] = None
-    credit_score: Optional[int] = None
-    employment_status: Optional[str] = None
-    employer_name: Optional[str] = None
-    phone: Optional[str] = None
-    alternate_email: Optional[str] = None
+    message: Optional[str] = Field(None, description="Optional message to the property owner")
+    move_in_date: Optional[datetime] = Field(None, description="Preferred move-in date")
+    lease_duration: Optional[int] = Field(None, description="Lease duration in months")
+    annual_income: Optional[int] = Field(None, description="Annual income in dollars", ge=0)
+    credit_score: Optional[int] = Field(None, description="Credit score (300-850)", ge=300, le=850)
+    employment_status: Optional[str] = Field(None, description="Current employment status")
+    employer_name: Optional[str] = Field(None, description="Name of current employer")
+    phone: Optional[str] = Field(None, description="Contact phone number")
+    alternate_email: Optional[str] = Field(None, description="Alternate email address")
 
 class ApplicationCreate(ApplicationBase):
     """Schema for creating an application"""
-    property_id: int
-    
-    @validator('lease_duration')
-    def validate_lease_duration(cls, v):
-        if v is not None and v <= 0:
-            raise ValueError('Lease duration must be positive')
-        return v
-    
-    @validator('annual_income')
-    def validate_annual_income(cls, v):
-        if v is not None and v <= 0:
-            raise ValueError('Annual income must be positive')
-        return v
-    
-    @validator('credit_score')
-    def validate_credit_score(cls, v):
-        if v is not None and (v < 300 or v > 850):
-            raise ValueError('Credit score must be between 300 and 850')
-        return v
+    property_id: int = Field(..., description="ID of the property to apply for")
+
+    @model_validator(mode='after')
+    def validate_application_data(self):
+        if self.move_in_date and self.move_in_date < datetime.now(timezone.utc):
+            raise ValueError('Move-in date cannot be in the past')
+        return self
 
 class ApplicationUpdate(BaseModel):
     """Schema for updating an application"""
-    status: Optional[ApplicationStatus] = None
-    message: Optional[str] = None
-    move_in_date: Optional[datetime] = None
-    lease_duration: Optional[int] = None
-    annual_income: Optional[int] = None
-    credit_score: Optional[int] = None
-    employment_status: Optional[str] = None
-    employer_name: Optional[str] = None
-    phone: Optional[str] = None
-    alternate_email: Optional[str] = None
-    documents_urls: Optional[List[str]] = None
+    status: Optional[ApplicationStatus] = Field(None, description="Application status")
+    message: Optional[str] = Field(None, description="Optional message to the property owner")
+    move_in_date: Optional[datetime] = Field(None, description="Preferred move-in date")
+    lease_duration: Optional[int] = Field(None, description="Lease duration in months", ge=1)
+    annual_income: Optional[int] = Field(None, description="Annual income in dollars", ge=0)
+    credit_score: Optional[int] = Field(None, description="Credit score (300-850)", ge=300, le=850)
+    employment_status: Optional[str] = Field(None, description="Current employment status")
+    employer_name: Optional[str] = Field(None, description="Name of current employer")
+    phone: Optional[str] = Field(None, description="Contact phone number")
+    alternate_email: Optional[str] = Field(None, description="Alternate email address")
+    documents_urls: Optional[List[str]] = Field(default_factory=list, description="List of document URLs")
 
 class ApplicationResponse(ApplicationBase):
     """Schema for application response"""
     id: int
     status: ApplicationStatus
-    documents_urls: Optional[List[str]] = None
+    documents_urls: List[str] = Field(default_factory=list)
     is_active: bool = True
     applicant_id: int
     property_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
 
+    @computed_field
+    @property
+    def is_long_term(self) -> bool:
+        """Whether lease is long-term (>12 months)"""
+        return self.lease_duration is not None and self.lease_duration > 12
+
     class Config:
         from_attributes = True
 
-class ApplicationWithDetails(ApplicationResponse):
+class ApplicationDetailResponse(ApplicationResponse):
     """Schema for application with related data"""
-    applicant: Optional[dict] = None  # User data
-    property: Optional[dict] = None   # Property data
-
-
+    applicant: Optional[dict] = Field(None, description="Applicant user information")
+    property: Optional[dict] = Field(None, description="Property information")

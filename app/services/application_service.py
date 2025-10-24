@@ -4,6 +4,7 @@ Application service for business logic
 
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import json
 from app.models.application import Application
 from app.schemas.application import ApplicationCreate, ApplicationUpdate
 
@@ -12,29 +13,33 @@ class ApplicationService:
     
     def __init__(self, db: Session):
         self.db = db
-    
+
+    def _normalize_documents_urls(self, app: Application) -> Application:
+        """Ensure documents_urls is always a Python list"""
+        if isinstance(app.documents_urls, str):
+            try:
+                app.documents_urls = json.loads(app.documents_urls)
+            except json.JSONDecodeError:
+                app.documents_urls = []
+        elif app.documents_urls is None:
+            app.documents_urls = []
+        return app
+
     def get_application_by_id(self, application_id: int) -> Optional[Application]:
-        """Get application by ID"""
-        return self.db.query(Application).filter(Application.id == application_id).first()
-    
+        app = self.db.query(Application).filter(Application.id == application_id).first()
+        if app:
+            app = self._normalize_documents_urls(app)
+        return app
+
     def get_user_applications(self, user_id: int) -> List[Application]:
-        """Get all applications for a user"""
-        return self.db.query(Application).filter(
+        apps = self.db.query(Application).filter(
             Application.applicant_id == user_id,
             Application.is_active == True
         ).all()
-    
-    def get_property_applications(self, property_id: int) -> List[Application]:
-        """Get all applications for a property"""
-        return self.db.query(Application).filter(
-            Application.property_id == property_id,
-            Application.is_active == True
-        ).all()
-    
+        return [self._normalize_documents_urls(a) for a in apps]
+
     def create_application(self, application_data: ApplicationCreate, user_id: int) -> Application:
-        """Create a new application"""
-        # Create application object
-        application = Application(
+        app = Application(
             property_id=application_data.property_id,
             message=application_data.message,
             move_in_date=application_data.move_in_date,
@@ -47,45 +52,26 @@ class ApplicationService:
             alternate_email=application_data.alternate_email,
             applicant_id=user_id
         )
-        
-        # Add to database
-        self.db.add(application)
+        self.db.add(app)
         self.db.commit()
-        self.db.refresh(application)
-        
-        return application
-    
+        self.db.refresh(app)
+        return self._normalize_documents_urls(app)
+
     def update_application(self, application_id: int, application_data: ApplicationUpdate) -> Optional[Application]:
-        """Update an application"""
-        application = self.get_application_by_id(application_id)
-        if not application:
+        app = self.get_application_by_id(application_id)
+        if not app:
             return None
-        
-        # Update fields
-        update_data = application_data.dict(exclude_unset=True)
+        update_data = application_data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
-            setattr(application, field, value)
-        
+            setattr(app, field, value)
         self.db.commit()
-        self.db.refresh(application)
-        
-        return application
-    
+        self.db.refresh(app)
+        return self._normalize_documents_urls(app)
+
     def delete_application(self, application_id: int) -> bool:
-        """Soft delete an application"""
-        application = self.get_application_by_id(application_id)
-        if not application:
+        app = self.get_application_by_id(application_id)
+        if not app:
             return False
-        
-        application.is_active = False
+        app.is_active = False
         self.db.commit()
         return True
-    
-    def get_applications_by_status(self, status: str) -> List[Application]:
-        """Get applications by status"""
-        return self.db.query(Application).filter(
-            Application.status == status,
-            Application.is_active == True
-        ).all()
-
-
