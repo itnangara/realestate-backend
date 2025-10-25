@@ -3,8 +3,10 @@ User service for business logic
 """
 
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from app.models.user import User
+from app.models.role import Role
+from app.models.user_role import UserRole
 from app.schemas.user import UserCreate, UserUpdate
 from app.services.auth_service import AuthService
 
@@ -56,15 +58,61 @@ class UserService:
         if not user:
             return None
         
-        # Update fields
+        # Handle roles separately if provided
         update_data = user_data.model_dump(exclude_unset=True)
+        roles_to_update = update_data.pop('roles', None)
+        
+        # Update other fields
         for field, value in update_data.items():
             setattr(user, field, value)
+        
+        # Handle role updates if provided
+        if roles_to_update is not None:
+            # Remove existing roles
+            self.db.query(UserRole).filter(UserRole.user_id == user_id).delete()
+            
+            # Add new roles
+            for role_name in roles_to_update:
+                role = self.db.query(Role).filter(Role.name == role_name).first()
+                if role:
+                    user_role = UserRole(user_id=user_id, role_id=role.id)
+                    self.db.add(user_role)
         
         self.db.commit()
         self.db.refresh(user)
         
         return user
+    
+    def update_roles(self, user_id: int, role_names: List[str]) -> List[str]:
+        """Update user roles - dedicated role management"""
+        from app.models.role import Role
+        from app.models.user_role import UserRole
+        from fastapi import HTTPException
+        
+        # Fetch user
+        user = self.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Validate role names exist in Role table
+        roles = self.db.query(Role).filter(Role.name.in_(role_names)).all()
+        if len(roles) != len(role_names):
+            invalid_roles = set(role_names) - {role.name for role in roles}
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid role names: {', '.join(invalid_roles)}"
+            )
+        
+        # Clear old roles
+        self.db.query(UserRole).filter(UserRole.user_id == user_id).delete()
+        
+        # Assign new roles
+        for role in roles:
+            user_role = UserRole(user_id=user.id, role_id=role.id)
+            self.db.add(user_role)
+        
+        self.db.commit()
+        return [role.name for role in roles]
     
     def deactivate_user(self, user_id: int) -> bool:
         """Deactivate user account"""

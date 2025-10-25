@@ -4,6 +4,7 @@ User routes
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import List
 
 from app.utils.database import get_db
 from app.schemas.user import UserOut, UserUpdate
@@ -85,3 +86,35 @@ async def deactivate_current_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to deactivate account"
         )
+
+
+@router.put(
+    "/{user_id}/roles",
+    response_model=List[str],
+    summary="Update user roles",
+    response_description="List of updated role names for the user."
+)
+async def update_user_roles(
+    user_id: int,
+    roles: List[str],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the roles of a user.
+    
+    - **user_id**: ID of the user to update roles for
+    - **roles**: List of role names to assign to the user
+    
+    This endpoint:
+    - Validates that all role names exist in the database
+    - Removes existing role assignments
+    - Assigns new roles to the user
+    - Returns the list of assigned role names
+    
+    **Note**: This is a separate endpoint from user profile updates
+    to maintain clear separation of concerns.
+    """
+    user_service = UserService(db)
+    updated_roles = user_service.update_roles(user_id, roles)
+    return updated_roles

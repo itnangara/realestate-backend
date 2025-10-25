@@ -15,7 +15,7 @@ class UserCreate(BaseModel):
     first_name: str
     last_name: str
     phone: Optional[str] = None
-    roles: List[str] = Field(default_factory=list)  # Simple string array with better defaults
+    roles: List[str] = Field(default_factory=list, description="List of user roles")
 
     model_config = {"extra": "forbid"}
     
@@ -32,7 +32,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    """Schema for updating a user"""
+    """Schema for updating a user - only includes actual user table columns"""
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
@@ -44,9 +44,12 @@ class UserUpdate(BaseModel):
     budget_min: Optional[int] = None
     budget_max: Optional[int] = None
     property_preferences: Optional[dict] = None
-    roles: List[str] = Field(default_factory=list)  # Simple string array with better defaults
+    is_active: Optional[bool] = None
+    is_verified: Optional[bool] = None
+    is_premium: Optional[bool] = None
+    roles: Optional[List[str]] = Field(None, description="List of role names to assign")
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "forbid"}  # keep strict, only allow declared fields
     
     @validator('roles')
     def validate_roles(cls, v):

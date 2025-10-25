@@ -38,8 +38,7 @@ class User(Base):
     phone = Column(String(20), nullable=True)
     profile_image_url = Column(String(500), nullable=True)
     
-    # User roles and permissions - multi-role support
-    roles = Column(JSON, nullable=True, default=lambda: [])  # Array of roles: ["buyer", "agent", "investor"]
+    # User roles and permissions - relational approach + profile tables
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
     is_premium = Column(Boolean, default=False, nullable=False)
@@ -68,6 +67,15 @@ class User(Base):
     properties = relationship("Property", foreign_keys="Property.owner_id", back_populates="owner")
     applications = relationship("Application", foreign_keys="Application.applicant_id", back_populates="applicant")
     favorites = relationship("Favorite", foreign_keys="Favorite.user_id", back_populates="user")
+    
+    # Relational role system
+    user_roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+    
+    # Profile relationships (optional - only for users with specific roles)
+    tenant_profile = relationship("TenantProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    landlord_profile = relationship("LandlordProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    agent_profile = relationship("AgentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    investor_profile = relationship("InvestorProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', roles={self.roles})>"
@@ -77,55 +85,56 @@ class User(Base):
         """Get user's full name"""
         return f"{self.first_name} {self.last_name}"
     
+    @property
+    def roles(self):
+        """Return a list of role names for this user (fetched dynamically)"""
+        return [user_role.role.name for user_role in self.user_roles]
+    
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role"""
-        if not self.roles:
-            return False
         return role in self.roles
     
     def add_role(self, role: str) -> None:
-        """Add a role to user"""
-        if self.roles is None:
-            self.roles = []
-        if role not in self.roles:
-            self.roles.append(role)
+        """Add a role to user (requires RoleService)"""
+        # This method should be called through RoleService for proper implementation
+        pass
     
     def remove_role(self, role: str) -> None:
-        """Remove a role from user"""
-        if self.roles and role in self.roles:
-            self.roles.remove(role)
+        """Remove a role from user (requires RoleService)"""
+        # This method should be called through RoleService for proper implementation
+        pass
     
     @property
     def is_agent(self) -> bool:
         """Check if user is a real estate agent"""
-        return self.has_role(UserRoles.AGENT)
+        return self.has_role("agent")
     
     @property
     def is_landlord(self) -> bool:
         """Check if user is a landlord"""
-        return self.has_role(UserRoles.LANDLORD)
+        return self.has_role("landlord")
     
     @property
     def is_buyer(self) -> bool:
         """Check if user is a buyer"""
-        return self.has_role(UserRoles.BUYER)
+        return self.has_role("buyer")
     
     @property
     def is_investor(self) -> bool:
         """Check if user is an investor"""
-        return self.has_role(UserRoles.INVESTOR)
+        return self.has_role("investor")
     
     @property
     def is_seller(self) -> bool:
         """Check if user is a seller"""
-        return self.has_role(UserRoles.SELLER)
+        return self.has_role("seller")
     
     @property
     def is_tenant(self) -> bool:
         """Check if user is a tenant"""
-        return self.has_role(UserRoles.TENANT)
+        return self.has_role("tenant")
     
     @property
     def is_admin(self) -> bool:
         """Check if user is an admin"""
-        return self.has_role(UserRoles.ADMIN)
+        return self.has_role("admin")
