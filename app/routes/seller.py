@@ -18,7 +18,7 @@ from app.schemas.seller import (
 from app.dependencies.user_dependencies import get_current_user
 from app.models.user import User
 
-router = APIRouter(prefix="/api/sellers", tags=["sellers"])
+router = APIRouter(tags=["Sellers"])
 
 def get_seller_service(db: Session = Depends(get_db)) -> SellerService:
     """Dependency to inject SellerService"""
@@ -44,7 +44,7 @@ async def create_seller(
     - **is_old**: Whether the seller is considered old
     """
     seller = service.create_seller(seller_data)
-    return SellerResponse.from_orm(seller)
+    return SellerResponse.model_validate(seller)
 
 @router.get(
     "/",
@@ -63,7 +63,7 @@ async def get_all_sellers(
     Returns a list of all sellers with their basic information.
     """
     sellers = service.get_all_sellers()
-    return [SellerResponse.from_orm(seller) for seller in sellers]
+    return [SellerResponse.model_validate(seller) for seller in sellers]
 
 @router.get(
     "/{seller_id}",
@@ -85,7 +85,7 @@ async def get_seller(
     seller = service.get_seller_by_id(seller_id)
     if not seller:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Seller not found")
-    return SellerDetailResponse.from_orm(seller)
+    return SellerDetailResponse.model_validate(seller)
 
 @router.put(
     "/{seller_id}",
@@ -108,7 +108,7 @@ async def update_seller(
     seller = service.update_seller(seller_id, seller_data)
     if not seller:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Seller not found")
-    return SellerResponse.from_orm(seller)
+    return SellerResponse.model_validate(seller)
 
 @router.delete(
     "/{seller_id}",

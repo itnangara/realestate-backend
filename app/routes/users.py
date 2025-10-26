@@ -2,15 +2,19 @@
 User routes
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 
 from app.utils.database import get_db
-from app.schemas.user import UserOut, UserUpdate
+from app.schemas.user import UserOut, UserUpdate, UserRolesUpdate
 from app.services.user_service import UserService
 from app.dependencies.user_dependencies import get_current_user
 from app.models.user import User
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,6 +50,8 @@ async def update_current_user(
     """
     Update the profile information of the authenticated user.
     
+    **Note**: This endpoint does NOT allow role changes. Roles can only be modified by admins via /api/users/{id}/roles.
+    
     - **first_name**: User's first name
     - **last_name**: User's last name
     - **phone**: Contact phone number
@@ -57,7 +63,6 @@ async def update_current_user(
     - **budget_min**: Minimum budget preference
     - **budget_max**: Maximum budget preference
     - **property_preferences**: Property preference settings
-    - **roles**: List of user roles
     """
     user_service = UserService(db)
     updated_user = user_service.update_user(current_user.id, user_data)
@@ -96,7 +101,7 @@ async def deactivate_current_user(
 )
 async def update_user_roles(
     user_id: int,
-    roles: List[str],
+    roles_data: UserRolesUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -114,7 +119,34 @@ async def update_user_roles(
     
     **Note**: This is a separate endpoint from user profile updates
     to maintain clear separation of concerns.
+    
+    **Admin-only**: Only users with admin role can modify user roles.
     """
+    # Admin-only restriction
+    if not current_user.has_role("admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can modify user roles"
+        )
+    
     user_service = UserService(db)
-    updated_roles = user_service.update_roles(user_id, roles)
+    
+    # Get target user for logging
+    target_user = user_service.get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+    
+    # Log admin action for audit trail
+    logger.info("Admin %s (ID: %s) updating roles for user %s (ID: %s)", 
+                current_user.email, current_user.id, target_user.email, user_id)
+    logger.info("New roles requested: %s", roles_data.roles)
+    
+    updated_roles = user_service.update_roles(user_id, roles_data.roles)
+    
+    # Log successful role update
+    logger.info("Successfully updated roles for user %s to: %s", target_user.email, updated_roles)
+    
     return updated_roles

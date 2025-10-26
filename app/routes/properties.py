@@ -43,7 +43,7 @@ async def get_properties(
     - **max_price**: Maximum price filter
     """
     property_service = PropertyService(db)
-    return property_service.get_properties(
+    properties = property_service.get_properties(
         skip=skip,
         limit=limit,
         city=city,
@@ -52,6 +52,7 @@ async def get_properties(
         min_price=min_price,
         max_price=max_price
     )
+    return [PropertyResponse.model_validate(property) for property in properties]
 
 @router.get(
     "/{property_id}",
@@ -78,7 +79,7 @@ async def get_property(
             detail="Property not found"
         )
     
-    return property
+    return PropertyResponse.model_validate(property)
 
 @router.post(
     "/",
@@ -119,7 +120,7 @@ async def create_property(
     """
     property_service = PropertyService(db)
     property = property_service.create_property(property_data, current_user.id)
-    return property
+    return PropertyResponse.model_validate(property)
 
 @router.put(
     "/{property_id}",
@@ -159,7 +160,7 @@ async def update_property(
     
     # Update property
     updated_property = property_service.update_property(property_id, property_data)
-    return updated_property
+    return PropertyResponse.model_validate(updated_property)
 
 @router.delete(
     "/{property_id}",

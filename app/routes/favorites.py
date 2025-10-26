@@ -18,7 +18,7 @@ from app.schemas.favorite import (
 )
 from app.models.user import User
 
-router = APIRouter(prefix="/api/favorites", tags=["favorites"])
+router = APIRouter(tags=["Favorites"])
 
 def get_favorite_service(db: Session = Depends(get_db)) -> FavoriteService:
     """Dependency to inject FavoriteService"""
@@ -37,7 +37,7 @@ async def create_favorite(
     service: FavoriteService = Depends(get_favorite_service),
 ):
     fav = service.create_favorite(favorite_data, current_user.id)
-    return FavoriteResponse.from_orm(fav)
+    return FavoriteResponse.model_validate(fav)
 
 @router.get(
     "/",
@@ -51,7 +51,7 @@ async def get_user_favorites(
     service: FavoriteService = Depends(get_favorite_service),
 ):
     favs = service.get_user_favorites(current_user.id)
-    return [FavoriteDetailResponse.from_orm(fav) for fav in favs]
+    return [FavoriteDetailResponse.model_validate(fav) for fav in favs]
 
 @router.delete(
     "/{favorite_id}",
