@@ -2,7 +2,7 @@
 Application Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, model_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime, timezone
 from app.models.application import ApplicationStatus
@@ -22,6 +22,7 @@ class ApplicationBase(BaseModel):
 class ApplicationCreate(ApplicationBase):
     """Schema for creating an application"""
     property_id: int = Field(..., description="ID of the property to apply for")
+    documents_urls: Optional[List[str]] = Field(default_factory=list, description="List of document URLs")
 
     @model_validator(mode='after')
     def validate_application_data(self):
@@ -60,8 +61,7 @@ class ApplicationResponse(ApplicationBase):
         """Whether lease is long-term (>12 months)"""
         return self.lease_duration is not None and self.lease_duration > 12
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ApplicationDetailResponse(ApplicationResponse):
     """Schema for application with related data"""

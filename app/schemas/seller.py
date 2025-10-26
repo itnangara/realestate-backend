@@ -2,7 +2,7 @@
 Seller Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -28,8 +28,7 @@ class SellerResponse(SellerBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SellerDetailResponse(SellerResponse):
     """Schema for seller with additional details"""

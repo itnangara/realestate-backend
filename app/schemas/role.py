@@ -27,3 +27,13 @@ class UserRoleResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RoleListResponse(BaseModel):
+    """Schema for role listing response"""
+    id: int
+    name: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True

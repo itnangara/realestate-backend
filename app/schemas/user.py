@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import List, Optional, Literal
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from datetime import datetime
 from app.models.user import UserRoles
 
@@ -19,7 +19,8 @@ class UserCreate(BaseModel):
 
     model_config = {"extra": "forbid"}
     
-    @validator('roles')
+    @field_validator('roles')
+    @classmethod
     def validate_roles(cls, v):
         """Validate that all roles are from allowed UserRoles"""
         if not v:
@@ -51,7 +52,8 @@ class UserUpdate(BaseModel):
 
     model_config = {"extra": "forbid"}  # keep strict, only allow declared fields
     
-    @validator('roles')
+    @field_validator('roles')
+    @classmethod
     def validate_roles(cls, v):
         """Validate that all roles are from allowed UserRoles"""
         if not v:
@@ -61,6 +63,30 @@ class UserUpdate(BaseModel):
             if role not in allowed_roles:
                 raise ValueError(f'Invalid role: {role}. Allowed roles: {allowed_roles}')
         return v
+
+
+class UserRolesUpdate(BaseModel):
+    """Schema for updating user roles"""
+    roles: List[str] = Field(..., description="List of role names to assign to the user")
+
+    @field_validator('roles')
+    @classmethod
+    def validate_roles(cls, v):
+        """Validate that all roles are from allowed UserRoles"""
+        if not v:
+            return v
+        allowed_roles = UserRoles.ALL_ROLES
+        for role in v:
+            if role not in allowed_roles:
+                raise ValueError(f'Invalid role: {role}. Allowed roles: {allowed_roles}')
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "roles": ["buyer", "seller", "investor"]
+            }
+        }
 
 
 class UserOut(BaseModel):

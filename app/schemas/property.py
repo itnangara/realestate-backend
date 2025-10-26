@@ -2,7 +2,7 @@
 Property Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, validator, root_validator
+from pydantic import BaseModel, validator, root_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from app.models.property import PropertyType, PropertyStatus
@@ -85,8 +85,7 @@ class PropertyResponse(PropertyBase):
     has_garden: bool = False
     has_balcony: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class PropertySearch(BaseModel):
     """Schema for property search filters"""

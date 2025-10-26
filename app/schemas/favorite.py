@@ -2,7 +2,7 @@
 Favorite Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -16,13 +16,12 @@ class FavoriteCreate(FavoriteBase):
 
 class FavoriteResponse(FavoriteBase):
     """Schema for favorite response"""
+    model_config = ConfigDict(from_attributes=True)
+    
     id: int
     user_id: int
     property_id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 class FavoriteDetailResponse(FavoriteResponse):
     """Schema for favorite with property details"""
