@@ -51,7 +51,11 @@ class AuthService:
             if email is None:
                 raise JWTError("Invalid token")
             return email
-        except JWTError:
-            raise JWTError("Could not validate credentials")
-
-
+        except JWTError as e:
+            # Re-raise as HTTPException for FastAPI to handle properly
+            from fastapi import HTTPException, status
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )

@@ -50,6 +50,7 @@ class ApplicationService:
             employer_name=application_data.employer_name,
             phone=application_data.phone,
             alternate_email=application_data.alternate_email,
+            documents_urls=application_data.documents_urls,
             applicant_id=user_id
         )
         self.db.add(app)
