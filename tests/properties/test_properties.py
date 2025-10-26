@@ -240,13 +240,15 @@ def test_search_properties(client):
     search_filters = {
         "city": "New York",
         "property_type": "house",
-        "min_price": 200000,
-        "max_price": 800000,
-        "min_bedrooms": 2,
-        "max_bedrooms": 4
+        "price_min": 200000,
+        "price_max": 800000,
+        "bedrooms": 2
     }
     
     response = client.post("/api/properties/search", json=search_filters)
     
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "properties" in data
+    assert "total_count" in data
