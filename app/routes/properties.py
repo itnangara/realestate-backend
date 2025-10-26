@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.utils.database import get_db
-from app.schemas.property import PropertyResponse, PropertyCreate, PropertyUpdate, PropertySearch
+from app.schemas.property import PropertyResponse, PropertyCreate, PropertyUpdate, PropertySearch, PropertySearchFilters, PropertySearchResponse
 from app.services.property_service import PropertyService
 from app.dependencies.user_dependencies import get_current_user
 from app.models.user import User
@@ -53,6 +53,107 @@ async def get_properties(
         max_price=max_price
     )
     return [PropertyResponse.model_validate(property) for property in properties]
+
+# --- Production-Grade Advanced Search Endpoints ---
+
+@router.get(
+    "/search",
+    response_model=PropertySearchResponse,
+    summary="Advanced Property Search (GET)",
+    response_description="Search results with pagination metadata."
+)
+async def search_properties_get(
+    price_min: Optional[int] = Query(None, ge=0, description="Minimum price"),
+    price_max: Optional[int] = Query(None, ge=0, description="Maximum price"),
+    property_type: Optional[str] = Query(None, description="Property type"),
+    bedrooms: Optional[int] = Query(None, ge=0, description="Minimum bedrooms"),
+    bathrooms: Optional[float] = Query(None, ge=0, description="Minimum bathrooms"),
+    square_feet_min: Optional[int] = Query(None, ge=0, description="Minimum square feet"),
+    square_feet_max: Optional[int] = Query(None, ge=0, description="Maximum square feet"),
+    city: Optional[str] = Query(None, description="City name"),
+    state: Optional[str] = Query(None, description="State"),
+    zip_code: Optional[str] = Query(None, description="ZIP code"),
+    country: Optional[str] = Query(None, description="Country"),
+    features: Optional[str] = Query(None, description="Comma-separated features"),
+    status: Optional[str] = Query(None, description="Property status"),
+    is_featured: Optional[bool] = Query(None, description="Featured properties only"),
+    year_built_min: Optional[int] = Query(None, ge=1800, le=2030, description="Minimum year built"),
+    year_built_max: Optional[int] = Query(None, ge=1800, le=2030, description="Maximum year built"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    sort_by: str = Query("created_at", description="Sort field"),
+    sort_order: str = Query("desc", description="Sort order: asc or desc"),
+    db: Session = Depends(get_db)
+):
+    """
+    Advanced property search with comprehensive filtering options.
+    
+    **GET endpoint for simple queries** - Good for caching and bookmarking.
+    
+    - **price_min/max**: Price range filtering
+    - **property_type**: Filter by property type (house, apartment, etc.)
+    - **bedrooms/bathrooms**: Minimum room counts
+    - **square_feet_min/max**: Size range filtering
+    - **city/state/zip_code/country**: Location filtering
+    - **features**: Comma-separated features (e.g., "pool,garage")
+    - **status**: Property status (for_sale, for_rent, etc.)
+    - **is_featured**: Show only featured properties
+    - **year_built_min/max**: Year range filtering
+    - **page/limit**: Pagination controls
+    - **sort_by**: Sort field (price, created_at, bedrooms, etc.)
+    - **sort_order**: Sort direction (asc, desc)
+    """
+    filters = PropertySearchFilters(
+        price_min=price_min, price_max=price_max,
+        property_type=property_type, bedrooms=bedrooms, bathrooms=bathrooms,
+        square_feet_min=square_feet_min, square_feet_max=square_feet_max,
+        city=city, state=state, zip_code=zip_code, country=country,
+        features=features, status=status, is_featured=is_featured,
+        year_built_min=year_built_min, year_built_max=year_built_max,
+        page=page, limit=limit, sort_by=sort_by, sort_order=sort_order
+    )
+    
+    service = PropertyService(db)
+    properties, total_count = service.search_properties_advanced(filters)
+    
+    return PropertySearchResponse(
+        properties=[PropertyResponse.model_validate(p) for p in properties],
+        total_count=total_count,
+        page=filters.page,
+        limit=filters.limit,
+        total_pages=(total_count + filters.limit - 1) // filters.limit
+    )
+
+@router.post(
+    "/search",
+    response_model=PropertySearchResponse,
+    summary="Advanced Property Search (POST)",
+    response_description="Search results with pagination metadata."
+)
+async def search_properties_post(
+    filters: PropertySearchFilters,
+    db: Session = Depends(get_db)
+):
+    """
+    Advanced property search with comprehensive filtering options.
+    
+    **POST endpoint for complex queries** - Better for complex filter objects and arrays.
+    
+    Use this endpoint when you need to send complex filter objects or when
+    the query parameters would be too long for a GET request.
+    
+    Same filtering options as GET endpoint but sent in request body.
+    """
+    service = PropertyService(db)
+    properties, total_count = service.search_properties_advanced(filters)
+    
+    return PropertySearchResponse(
+        properties=[PropertyResponse.model_validate(p) for p in properties],
+        total_count=total_count,
+        page=filters.page,
+        limit=filters.limit,
+        total_pages=(total_count + filters.limit - 1) // filters.limit
+    )
 
 @router.get(
     "/{property_id}",
@@ -224,7 +325,6 @@ async def get_user_properties(
     property_service = PropertyService(db)
     properties = property_service.get_user_properties(user_id)
     return properties
-
 @router.post(
     "/search",
     response_model=List[PropertyResponse],
@@ -261,3 +361,104 @@ async def search_properties(
     search_dict = search_filters.model_dump(exclude_unset=True)
     properties = property_service.search_properties(search_dict)
     return properties
+
+# --- Production-Grade Advanced Search Endpoints ---
+
+@router.get(
+    "/search",
+    response_model=PropertySearchResponse,
+    summary="Advanced Property Search (GET)",
+    response_description="Search results with pagination metadata."
+)
+async def search_properties_get(
+    price_min: Optional[int] = Query(None, ge=0, description="Minimum price"),
+    price_max: Optional[int] = Query(None, ge=0, description="Maximum price"),
+    property_type: Optional[str] = Query(None, description="Property type"),
+    bedrooms: Optional[int] = Query(None, ge=0, description="Minimum bedrooms"),
+    bathrooms: Optional[float] = Query(None, ge=0, description="Minimum bathrooms"),
+    square_feet_min: Optional[int] = Query(None, ge=0, description="Minimum square feet"),
+    square_feet_max: Optional[int] = Query(None, ge=0, description="Maximum square feet"),
+    city: Optional[str] = Query(None, description="City name"),
+    state: Optional[str] = Query(None, description="State"),
+    zip_code: Optional[str] = Query(None, description="ZIP code"),
+    country: Optional[str] = Query(None, description="Country"),
+    features: Optional[str] = Query(None, description="Comma-separated features"),
+    status: Optional[str] = Query(None, description="Property status"),
+    is_featured: Optional[bool] = Query(None, description="Featured properties only"),
+    year_built_min: Optional[int] = Query(None, ge=1800, le=2030, description="Minimum year built"),
+    year_built_max: Optional[int] = Query(None, ge=1800, le=2030, description="Maximum year built"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+    sort_by: str = Query("created_at", description="Sort field"),
+    sort_order: str = Query("desc", description="Sort order: asc or desc"),
+    db: Session = Depends(get_db)
+):
+    """
+    Advanced property search with comprehensive filtering options.
+    
+    **GET endpoint for simple queries** - Good for caching and bookmarking.
+    
+    - **price_min/max**: Price range filtering
+    - **property_type**: Filter by property type (house, apartment, etc.)
+    - **bedrooms/bathrooms**: Minimum room counts
+    - **square_feet_min/max**: Size range filtering
+    - **city/state/zip_code/country**: Location filtering
+    - **features**: Comma-separated features (e.g., "pool,garage")
+    - **status**: Property status (for_sale, for_rent, etc.)
+    - **is_featured**: Show only featured properties
+    - **year_built_min/max**: Year range filtering
+    - **page/limit**: Pagination controls
+    - **sort_by**: Sort field (price, created_at, bedrooms, etc.)
+    - **sort_order**: Sort direction (asc, desc)
+    """
+    filters = PropertySearchFilters(
+        price_min=price_min, price_max=price_max,
+        property_type=property_type, bedrooms=bedrooms, bathrooms=bathrooms,
+        square_feet_min=square_feet_min, square_feet_max=square_feet_max,
+        city=city, state=state, zip_code=zip_code, country=country,
+        features=features, status=status, is_featured=is_featured,
+        year_built_min=year_built_min, year_built_max=year_built_max,
+        page=page, limit=limit, sort_by=sort_by, sort_order=sort_order
+    )
+    
+    service = PropertyService(db)
+    properties, total_count = service.search_properties_advanced(filters)
+    
+    return PropertySearchResponse(
+        properties=[PropertyResponse.model_validate(p) for p in properties],
+        total_count=total_count,
+        page=filters.page,
+        limit=filters.limit,
+        total_pages=(total_count + filters.limit - 1) // filters.limit
+    )
+
+@router.post(
+    "/search",
+    response_model=PropertySearchResponse,
+    summary="Advanced Property Search (POST)",
+    response_description="Search results with pagination metadata."
+)
+async def search_properties_post(
+    filters: PropertySearchFilters,
+    db: Session = Depends(get_db)
+):
+    """
+    Advanced property search with comprehensive filtering options.
+    
+    **POST endpoint for complex queries** - Better for complex filter objects and arrays.
+    
+    Use this endpoint when you need to send complex filter objects or when
+    the query parameters would be too long for a GET request.
+    
+    Same filtering options as GET endpoint but sent in request body.
+    """
+    service = PropertyService(db)
+    properties, total_count = service.search_properties_advanced(filters)
+    
+    return PropertySearchResponse(
+        properties=[PropertyResponse.model_validate(p) for p in properties],
+        total_count=total_count,
+        page=filters.page,
+        limit=filters.limit,
+        total_pages=(total_count + filters.limit - 1) // filters.limit
+    )

@@ -2,7 +2,7 @@
 Property Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, validator, root_validator, ConfigDict
+from pydantic import BaseModel, validator, root_validator, ConfigDict, Field, conint, confloat
 from typing import Optional, List
 from datetime import datetime
 from app.models.property import PropertyType, PropertyStatus
@@ -87,6 +87,51 @@ class PropertyResponse(PropertyBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+# --- Production-Grade Advanced Search Schemas ---
+
+class PropertySearchFilters(BaseModel):
+    """Production-grade property search filters with strict validation"""
+    # Price filters
+    price_min: Optional[conint(ge=0)] = Field(None, description="Minimum price")
+    price_max: Optional[conint(ge=0)] = Field(None, description="Maximum price")
+    
+    # Property details
+    property_type: Optional[PropertyType] = Field(None, description="Property type")
+    bedrooms: Optional[conint(ge=0)] = Field(None, description="Minimum bedrooms")
+    bathrooms: Optional[confloat(ge=0)] = Field(None, description="Minimum bathrooms")
+    square_feet_min: Optional[conint(ge=0)] = Field(None, description="Minimum square feet")
+    square_feet_max: Optional[conint(ge=0)] = Field(None, description="Maximum square feet")
+    
+    # Location filters
+    city: Optional[str] = Field(None, description="City name")
+    state: Optional[str] = Field(None, description="State")
+    zip_code: Optional[str] = Field(None, description="ZIP code")
+    country: Optional[str] = Field(None, description="Country")
+    
+    # Features filter
+    features: Optional[str] = Field(None, description="Comma-separated list of features")
+    
+    # Status & metadata
+    status: Optional[PropertyStatus] = Field(None, description="Property status")
+    is_featured: Optional[bool] = Field(None, description="Featured properties only")
+    year_built_min: Optional[conint(ge=1800, le=2030)] = Field(None, description="Minimum year built")
+    year_built_max: Optional[conint(ge=1800, le=2030)] = Field(None, description="Maximum year built")
+    
+    # Pagination & Sorting
+    page: conint(ge=1) = Field(1, description="Page number")
+    limit: conint(ge=1, le=100) = Field(20, description="Items per page")
+    sort_by: str = Field("created_at", description="Sort field")
+    sort_order: str = Field("desc", description="Sort order: asc or desc")
+
+class PropertySearchResponse(BaseModel):
+    """Response schema for property search results"""
+    properties: List[PropertyResponse]
+    total_count: int
+    page: int
+    limit: int
+    total_pages: int
+
+# Legacy search schema (keeping for backward compatibility)
 class PropertySearch(BaseModel):
     """Schema for property search filters"""
     city: Optional[str] = None

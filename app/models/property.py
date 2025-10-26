@@ -3,10 +3,12 @@ Property model for real estate listings
 """
 
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Enum, ForeignKey, JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.utils.database import Base
 import enum
+import os
 
 class PropertyType(str, enum.Enum):
     """Property types enum - comprehensive real estate types"""
@@ -83,7 +85,7 @@ class Property(Base):
     hoa_fees = Column(Float, nullable=True)  # HOA monthly fees
     property_tax = Column(Float, nullable=True)  # Annual property tax
     
-    # Features and amenities - comprehensive list
+    # Features and amenities - lists (JSON for cross-database compatibility
     features = Column(JSON, nullable=True)  # Flexible features array
     amenities = Column(JSON, nullable=True)  # Flexible amenities array
     

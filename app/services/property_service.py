@@ -3,10 +3,10 @@ Property service for business logic
 """
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
-from typing import List, Optional
+from sqlalchemy import and_, or_, func
+from typing import List, Optional, Tuple
 from app.models.property import Property, PropertyType, PropertyStatus
-from app.schemas.property import PropertyCreate, PropertyUpdate
+from app.schemas.property import PropertyCreate, PropertyUpdate, PropertySearchFilters
 
 class PropertyService:
     """Property service class"""
@@ -196,5 +196,84 @@ class PropertyService:
         limit = search_filters.get('limit', 20)
         
         return query.offset(skip).limit(limit).all()
+    
+    # --- Production-Grade Advanced Search Method ---
+    
+    # Whitelist allowed fields for sorting to prevent SQL injection
+    SORTABLE_FIELDS = {
+        "price": Property.price,
+        "created_at": Property.created_at,
+        "bedrooms": Property.bedrooms,
+        "bathrooms": Property.bathrooms,
+        "square_feet": Property.square_feet,
+        "year_built": Property.year_built
+    }
+    
+    def search_properties_advanced(self, filters: PropertySearchFilters) -> Tuple[List[Property], int]:
+        """
+        Advanced property search with type-safe sorting and filtering.
+        Returns: (properties, total_count)
+        """
+        query = self.db.query(Property).filter(Property.is_active == True)
+        
+        # --- Price Filters ---
+        if filters.price_min is not None:
+            query = query.filter(Property.price >= filters.price_min)
+        if filters.price_max is not None:
+            query = query.filter(Property.price <= filters.price_max)
+        
+        # --- Property Details ---
+        if filters.property_type is not None:
+            query = query.filter(Property.property_type == filters.property_type)
+        if filters.bedrooms is not None:
+            query = query.filter(Property.bedrooms >= filters.bedrooms)
+        if filters.bathrooms is not None:
+            query = query.filter(Property.bathrooms >= filters.bathrooms)
+        if filters.square_feet_min is not None:
+            query = query.filter(Property.square_feet >= filters.square_feet_min)
+        if filters.square_feet_max is not None:
+            query = query.filter(Property.square_feet <= filters.square_feet_max)
+        
+        # --- Location Filters ---
+        if filters.city:
+            query = query.filter(func.lower(Property.city) == filters.city.lower())
+        if filters.state:
+            query = query.filter(func.lower(Property.state) == filters.state.lower())
+        if filters.zip_code:
+            query = query.filter(Property.zip_code == filters.zip_code)
+        if filters.country:
+            query = query.filter(func.lower(Property.country) == filters.country.lower())
+        
+        # --- Features Filter (JSONB) ---
+        if filters.features:
+            feature_list = [f.strip() for f in filters.features.split(",") if f.strip()]
+            conditions = [Property.features.contains([feature]) for feature in feature_list]
+            query = query.filter(Property.features.isnot(None), or_(*conditions))
+        
+        # --- Status & Metadata ---
+        if filters.status is not None:
+            query = query.filter(Property.status == filters.status)
+        if filters.is_featured is not None:
+            query = query.filter(Property.is_featured == filters.is_featured)
+        if filters.year_built_min is not None:
+            query = query.filter(Property.year_built >= filters.year_built_min)
+        if filters.year_built_max is not None:
+            query = query.filter(Property.year_built <= filters.year_built_max)
+        
+        # --- Total Count Before Pagination ---
+        total_count = query.count()
+        
+        # --- Secure Sorting ---
+        sort_attr = self.SORTABLE_FIELDS.get(filters.sort_by, Property.created_at)
+        if filters.sort_order == "desc":
+            query = query.order_by(sort_attr.desc())
+        else:
+            query = query.order_by(sort_attr.asc())
+        
+        # --- Pagination ---
+        offset = (filters.page - 1) * filters.limit
+        properties = query.offset(offset).limit(filters.limit).all()
+        
+        return properties, total_count
 
 
