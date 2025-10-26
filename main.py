@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
-from app.routes import auth, properties, users, applications, favorites
+from app.routes import auth, properties, users, applications, favorites, seller, role_routes
 from app.utils.database import engine, Base
 
 # Create database tables
@@ -44,6 +44,8 @@ app.include_router(properties.router, prefix="/api/properties", tags=["Propertie
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
+app.include_router(seller.router, prefix="/api/sellers", tags=["Sellers"])
+app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
 
 @app.get("/")
 async def root():
