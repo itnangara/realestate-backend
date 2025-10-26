@@ -78,7 +78,8 @@ class User(Base):
     investor_profile = relationship("InvestorProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<User(id={self.id}, email='{self.email}', roles={self.roles})>"
+        roles_str = str(self.roles) if hasattr(self, 'user_roles') else "[]"
+        return f"<User(id={self.id}, email='{self.email}', roles={roles_str})>"
     
     @property
     def full_name(self) -> str:

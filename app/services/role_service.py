@@ -13,19 +13,16 @@ class RoleService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_or_create_role(self, name: str):
-        """Get existing role or create it if missing"""
-        role = self.db.query(Role).filter_by(name=name).first()
-        if not role:
-            role = Role(name=name)
-            self.db.add(role)
-            self.db.commit()
-            self.db.refresh(role)
-        return role
+    def get_role_by_name(self, name: str):
+        """Get existing role by name (no creation)"""
+        return self.db.query(Role).filter_by(name=name).first()
 
     def assign_role_to_user(self, user_id: int, role_name: str):
-        """Assign a role to a user"""
-        role = self.get_or_create_role(role_name)
+        """Assign a role to a user (role must exist)"""
+        role = self.get_role_by_name(role_name)
+        if not role:
+            raise ValueError(f"Role '{role_name}' does not exist. Only predefined roles are allowed.")
+        
         existing = self.db.query(UserRole).filter_by(user_id=user_id, role_id=role.id).first()
         if existing:
             return existing
