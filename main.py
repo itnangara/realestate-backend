@@ -9,6 +9,10 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
 from app.routes import auth, properties, users, applications, favorites, seller, role_routes
 from app.utils.database import engine, Base
+from app.core.cache import init_cache
+from app.core.limiter import limiter
+from slowapi.errors import RateLimitExceeded
+from fastapi.responses import JSONResponse
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -38,6 +42,17 @@ app.add_middleware(
     allowed_hosts=["localhost", "127.0.0.1", "*.vercel.app", "*.netlify.app"]
 )
 
+# Rate limiter
+app.state.limiter = limiter
+
+# Rate limit exception handler
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request, exc):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"}
+    )
+
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(properties.router, prefix="/api/properties", tags=["Properties"])
@@ -46,6 +61,11 @@ app.include_router(applications.router, prefix="/api/applications", tags=["Appli
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(seller.router, prefix="/api/sellers", tags=["Sellers"])
 app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize cache on application startup"""
+    await init_cache()
 
 @app.get("/")
 async def root():
