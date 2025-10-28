@@ -19,13 +19,20 @@ from app.models.role import Role
 from app.models.user_role import UserRole
 from app.services.auth_service import AuthService
 
-# Use in-memory SQLite for testing
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+# Use PostgreSQL in CI, SQLite locally for speed
+import os
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///:memory:")
+
+if DATABASE_URL.startswith("postgresql"):
+    # PostgreSQL configuration for CI
+    engine = create_engine(DATABASE_URL)
+else:
+    # SQLite configuration for local testing
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
