@@ -5,21 +5,32 @@ Application endpoint tests
 import pytest
 
 
-def test_create_application(client, buyer_headers, db_session):
-    """Test creating application"""
-    # First create a property to apply for
+def create_test_property(client, headers):
+    """Helper function to create a test property"""
     property_data = {
         "title": "Test Property",
         "description": "Property for testing applications",
         "property_type": "house",
         "status": "for_sale",
+        "address": "123 Test Street",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
         "price": 400000
     }
     
-    # Create property (assuming we have a way to create properties)
-    # For now, we'll assume property ID 1 exists
+    response = client.post("/api/properties", json=property_data, headers=headers)
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def test_create_application(client, buyer_headers, db_session):
+    """Test creating application"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "I'm very interested in this property",
         "move_in_date": "2026-03-01T00:00:00Z",
         "lease_duration": 12,
@@ -39,16 +50,19 @@ def test_create_application(client, buyer_headers, db_session):
     
     assert response.status_code == 201
     data = response.json()
-    assert data["property_id"] == 1
+    assert data["property_id"] == property_id
     assert data["message"] == "I'm very interested in this property"
     assert data["status"] == "pending"
     assert data["applicant_id"] is not None
 
 
-def test_create_application_unauthorized(client):
+def test_create_application_unauthorized(client, buyer_headers):
     """Test creating application without authentication"""
+    # Create property first using valid headers
+    property_id = create_test_property(client, buyer_headers)
+    
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Test application"
     }
     
@@ -74,9 +88,12 @@ def test_get_user_applications_unauthorized(client):
 
 def test_get_application_by_id(client, buyer_headers, db_session):
     """Test getting specific application"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     # First create an application
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Test application for retrieval"
     }
     
@@ -102,9 +119,12 @@ def test_get_application_nonexistent(client, buyer_headers):
 
 def test_get_application_unauthorized(client, buyer_headers, agent_headers, db_session):
     """Test getting application from different user"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     # Create application as buyer
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Private application"
     }
     
@@ -120,9 +140,12 @@ def test_get_application_unauthorized(client, buyer_headers, agent_headers, db_s
 
 def test_update_application(client, buyer_headers, db_session):
     """Test updating application"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     # First create an application
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Original message"
     }
     
@@ -145,9 +168,12 @@ def test_update_application(client, buyer_headers, db_session):
 
 def test_update_application_unauthorized(client, buyer_headers, agent_headers, db_session):
     """Test updating application from different user"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     # Create application as buyer
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Original message"
     }
     
@@ -165,9 +191,12 @@ def test_update_application_unauthorized(client, buyer_headers, agent_headers, d
 
 def test_delete_application(client, buyer_headers, db_session):
     """Test deleting application"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     # First create an application
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Application to delete"
     }
     
@@ -182,9 +211,12 @@ def test_delete_application(client, buyer_headers, db_session):
 
 def test_delete_application_unauthorized(client, buyer_headers, agent_headers, db_session):
     """Test deleting application from different user"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     # Create application as buyer
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Application to delete"
     }
     
@@ -214,8 +246,11 @@ def test_application_validation(client, buyer_headers):
 
 def test_application_with_documents(client, buyer_headers):
     """Test application with document URLs"""
+    # Create property first
+    property_id = create_test_property(client, buyer_headers)
+    
     application_data = {
-        "property_id": 1,
+        "property_id": property_id,
         "message": "Application with documents",
         "documents_urls": [
             "https://example.com/doc1.pdf",
