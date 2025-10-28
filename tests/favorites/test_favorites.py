@@ -5,26 +5,26 @@ Favorites endpoint tests
 import pytest
 
 
-def test_add_favorite(client, buyer_headers):
+def test_add_favorite(client, buyer_headers, test_property):
     """Test adding property to favorites"""
     favorite_data = {
-        "property_id": 1
+        "property_id": test_property["id"]
     }
     
     response = client.post("/api/favorites", json=favorite_data, headers=buyer_headers)
     
     assert response.status_code == 201
     data = response.json()
-    assert data["property_id"] == 1
+    assert data["property_id"] == test_property["id"]
     assert data["user_id"] is not None
     assert "id" in data
     assert "created_at" in data
 
 
-def test_add_favorite_unauthorized(client):
+def test_add_favorite_unauthorized(client, test_property):
     """Test adding favorite without authentication"""
     favorite_data = {
-        "property_id": 1
+        "property_id": test_property["id"]
     }
     
     response = client.post("/api/favorites", json=favorite_data)
@@ -47,14 +47,14 @@ def test_get_user_favorites_unauthorized(client):
     assert response.status_code == 401
 
 
-def test_check_favorite_true(client, buyer_headers, db_session):
+def test_check_favorite_true(client, buyer_headers, test_property, db_session):
     """Test checking if property is favorited (true case)"""
     # First add a favorite
-    favorite_data = {"property_id": 1}
+    favorite_data = {"property_id": test_property["id"]}
     client.post("/api/favorites", json=favorite_data, headers=buyer_headers)
     
     # Check if it's favorited
-    response = client.get("/api/favorites/check/1", headers=buyer_headers)
+    response = client.get(f"/api/favorites/check/{test_property['id']}", headers=buyer_headers)
     
     assert response.status_code == 200
     data = response.json()
@@ -71,17 +71,17 @@ def test_check_favorite_false(client, buyer_headers):
     assert data["is_favorite"] is False
 
 
-def test_check_favorite_unauthorized(client):
+def test_check_favorite_unauthorized(client, test_property):
     """Test checking favorite without authentication"""
-    response = client.get("/api/favorites/check/1")
+    response = client.get(f"/api/favorites/check/{test_property['id']}")
     
     assert response.status_code == 401
 
 
-def test_remove_favorite(client, buyer_headers, db_session):
+def test_remove_favorite(client, buyer_headers, test_property, db_session):
     """Test removing favorite"""
     # First add a favorite
-    favorite_data = {"property_id": 1}
+    favorite_data = {"property_id": test_property["id"]}
     add_response = client.post("/api/favorites", json=favorite_data, headers=buyer_headers)
     favorite_id = add_response.json()["id"]
     
@@ -99,10 +99,10 @@ def test_remove_favorite_nonexistent(client, buyer_headers):
     assert "Favorite not found" in response.json()["detail"]
 
 
-def test_remove_favorite_unauthorized(client, buyer_headers, agent_headers, db_session):
+def test_remove_favorite_unauthorized(client, buyer_headers, agent_headers, test_property, db_session):
     """Test removing favorite from different user"""
     # Add favorite as buyer
-    favorite_data = {"property_id": 1}
+    favorite_data = {"property_id": test_property["id"]}
     add_response = client.post("/api/favorites", json=favorite_data, headers=buyer_headers)
     favorite_id = add_response.json()["id"]
     
@@ -112,9 +112,9 @@ def test_remove_favorite_unauthorized(client, buyer_headers, agent_headers, db_s
     assert response.status_code == 404  # Favorite not found for this user
 
 
-def test_duplicate_favorite(client, buyer_headers, db_session):
+def test_duplicate_favorite(client, buyer_headers, test_property, db_session):
     """Test adding duplicate favorite"""
-    favorite_data = {"property_id": 1}
+    favorite_data = {"property_id": test_property["id"]}
     
     # Add first favorite
     response1 = client.post("/api/favorites", json=favorite_data, headers=buyer_headers)
@@ -127,10 +127,10 @@ def test_duplicate_favorite(client, buyer_headers, db_session):
     assert response2.status_code in [201, 400]
 
 
-def test_favorite_with_property_details(client, buyer_headers, db_session):
+def test_favorite_with_property_details(client, buyer_headers, test_property, db_session):
     """Test favorite with property details included"""
     # Add a favorite
-    favorite_data = {"property_id": 1}
+    favorite_data = {"property_id": test_property["id"]}
     client.post("/api/favorites", json=favorite_data, headers=buyer_headers)
     
     # Get favorites (should include property details)
