@@ -11,6 +11,7 @@ from app.routes import auth, properties, users, applications, favorites, seller,
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
 from app.core.limiter import limiter
+from app.monitoring import setup_metrics
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 
@@ -61,6 +62,9 @@ app.include_router(applications.router, prefix="/api/applications", tags=["Appli
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(seller.router, prefix="/api/sellers", tags=["Sellers"])
 app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
+
+# Setup monitoring and metrics
+setup_metrics(app)
 
 @app.on_event("startup")
 async def startup_event():
