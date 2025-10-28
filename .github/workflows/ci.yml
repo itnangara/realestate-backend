@@ -63,7 +63,7 @@ jobs:
           REDIS_URL: redis://localhost:6379
           SECRET_KEY: test_secret_key_for_ci
         run: |
-          pytest -v --maxfail=5 --tb=short
+          pytest tests/ -v --maxfail=5 --tb=short
       
       - name: Upload coverage reports
         if: failure()
