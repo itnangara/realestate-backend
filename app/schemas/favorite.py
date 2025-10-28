@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 
+# Import PropertyResponse for the relationship
+from app.schemas.property import PropertyResponse
+
 class FavoriteBase(BaseModel):
     """Base favorite schema"""
     pass
@@ -25,7 +28,7 @@ class FavoriteResponse(FavoriteBase):
 
 class FavoriteDetailResponse(FavoriteResponse):
     """Schema for favorite with property details"""
-    property: Optional[dict] = Field(None, description="Property details")
+    property: Optional[PropertyResponse] = Field(None, description="Property details")
 
 class FavoriteCheckResponse(BaseModel):
     """Schema for favorite check response"""

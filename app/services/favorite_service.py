@@ -2,7 +2,7 @@
 Favorite service for business logic
 """
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 from typing import List, Optional
 from app.models.favorite import Favorite
@@ -18,7 +18,7 @@ class FavoriteService:
         return self.db.query(Favorite).filter(Favorite.id == favorite_id).first()
 
     def get_user_favorites(self, user_id: int) -> List[Favorite]:
-        return self.db.query(Favorite).filter(Favorite.user_id == user_id).all()
+        return self.db.query(Favorite).options(joinedload(Favorite.property)).filter(Favorite.user_id == user_id).all()
 
     def create_favorite(self, favorite_data: FavoriteCreate, user_id: int) -> Favorite:
         existing_favorite = self.db.query(Favorite).filter(
