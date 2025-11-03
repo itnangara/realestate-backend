@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import uvicorn
+from decouple import config
+import os
 from app.routes import auth, properties, users, applications, favorites, seller, role_routes
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
@@ -27,20 +29,27 @@ app = FastAPI(
     redoc_url="/api/redoc"
 )
 
-# CORS middleware
+# CORS middleware - get allowed origins from environment
+cors_origins = config(
+    "CORS_ORIGINS",
+    default="http://localhost:3000,http://localhost:5173"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    # Todo: add production live urls
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev servers
+    allow_origins=[origin.strip() for origin in cors_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Trusted host middleware
+# Trusted host middleware - get allowed hosts from environment
+trusted_hosts = config(
+    "TRUSTED_HOSTS",
+    default="localhost,127.0.0.1,*.vercel.app,*.netlify.app"
+).split(",")
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["localhost", "127.0.0.1", "*.vercel.app", "*.netlify.app"]
+    allowed_hosts=[host.strip() for host in trusted_hosts]
 )
 
 # Rate limiter

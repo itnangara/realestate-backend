@@ -4,13 +4,14 @@ Cache configuration for FastAPI using Redis
 import aioredis
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
-
+from decouple import config
 
 async def init_cache():
     """Initialize Redis cache for FastAPI"""
+    redis_url = config("REDIS_URL", default="redis://localhost:6379")
     try:
         redis = await aioredis.from_url(
-            "redis://localhost:6379", 
+            redis_url, 
             encoding="utf8", 
             decode_responses=True
         )
