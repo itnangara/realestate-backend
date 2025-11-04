@@ -1,7 +1,7 @@
 """
 Cache configuration for FastAPI using Redis
 """
-import aioredis
+import redis.asyncio as aioredis
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from decouple import config
