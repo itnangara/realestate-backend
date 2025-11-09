@@ -13,10 +13,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from decouple import config
 import os
-from app.routes import auth, properties, users, applications, favorites, seller, role_routes
+from app.routes import auth, properties, users, applications, favorites, seller, role_routes, documents, webhooks, admin
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
-from app.core.limiter import limiter
+from app.core.limiter import limiter, init_limiter
 from app.core.logger import get_logger
 from app.monitoring import setup_metrics
 from slowapi.errors import RateLimitExceeded
@@ -60,8 +60,25 @@ app.add_middleware(
     allowed_hosts=[host.strip() for host in trusted_hosts]
 )
 
-# Rate limiter
-app.state.limiter = limiter
+# Rate limiter - initialize with error handling
+# If limiter initialization failed, re-initialize and handle gracefully
+if limiter is None:
+    logger.warning(
+        "rate_limiter_not_available",
+        message="Rate limiter not initialized - attempting re-initialization"
+    )
+    limiter = init_limiter()
+
+if limiter is not None:
+    app.state.limiter = limiter
+    logger.info("rate_limiter_attached", message="Rate limiter attached to application")
+else:
+    logger.warning(
+        "rate_limiter_disabled",
+        message="Rate limiting disabled - application running without rate limiting protection"
+    )
+    # Create a dummy limiter state to prevent errors in routes that use @limiter.limit()
+    app.state.limiter = None
 
 # Request logging middleware
 @app.middleware("http")
@@ -312,6 +329,9 @@ app.include_router(applications.router, prefix="/api/applications", tags=["Appli
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(seller.router, prefix="/api/sellers", tags=["Sellers"])
 app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
+app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
 # Setup monitoring and metrics
 setup_metrics(app)

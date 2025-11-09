@@ -34,3 +34,13 @@ pytest tests/ -v --tb=long
 # To view more traceback details (add temp below code, remove from tests once testing is done)
 print("Isaac Temp:",response.json())
 print("Isaac Temp:",response.status_code)
+
+### Onboarding Process Tests
+# Run all Phase 2 tests
+pytest tests/services/test_s3_service.py tests/services/test_audit_service.py tests/core/test_feature_flags.py -v
+
+# Run specific test file
+pytest tests/services/test_s3_service.py -v
+
+# Run with coverage
+pytest tests/services/ tests/core/ --cov=app.services --cov=app.core -v

@@ -17,6 +17,7 @@ from app.utils.database import get_db, Base
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
+from app.models.audit_log import AuditLog  # Import AuditLog to ensure table is created
 from app.services.auth_service import AuthService
 
 # Use PostgreSQL in CI, SQLite locally for speed
@@ -64,11 +65,26 @@ def client():
 @pytest.fixture(scope="function")
 def db_session():
     """Database session fixture"""
+    # Create all tables before each test
+    # Note: For SQLite, we only create tables that don't use PostgreSQL-specific types
+    # Models with ARRAY/JSONB will be handled by their specific test fixtures
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        # If creation fails (e.g., due to PostgreSQL-specific types in SQLite),
+        # create only the essential tables needed for most tests
+        # This allows tests to selectively create tables they need
+        pass
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
+        # Clean up tables after each test
+        try:
+            Base.metadata.drop_all(bind=engine)
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="function")

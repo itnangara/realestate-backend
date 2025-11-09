@@ -14,6 +14,13 @@ from .application import (
     ApplicationBase, ApplicationCreate, ApplicationUpdate,
     ApplicationResponse, ApplicationDetailResponse
 )
+from .document import (
+    DocumentUploadRequest, DocumentUploadResponse,
+    DocumentResponse, DocumentDownloadResponse, DocumentListResponse
+)
+from .role_request import (
+    RoleRequestCreate, RoleRequestResponse, RoleRequestListResponse
+)
 
 __all__ = [
     # User schemas
@@ -36,7 +43,19 @@ __all__ = [
     "ApplicationCreate",
     "ApplicationUpdate",
     "ApplicationResponse", 
-    "ApplicationDetailResponse"
+    "ApplicationDetailResponse",
+    
+    # Document schemas
+    "DocumentUploadRequest",
+    "DocumentUploadResponse",
+    "DocumentResponse",
+    "DocumentDownloadResponse",
+    "DocumentListResponse",
+    
+    # Role Request schemas
+    "RoleRequestCreate",
+    "RoleRequestResponse",
+    "RoleRequestListResponse"
 ]
 
 

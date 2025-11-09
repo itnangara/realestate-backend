@@ -9,7 +9,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
+      # Override with Docker-specific values (service names instead of localhost)
       - DATABASE_URL=postgresql://inangara:pass@db:5432/prod_real_estate_db
       - REDIS_URL=redis://redis:6379
 
