@@ -11,65 +11,31 @@ Tests:
 
 import pytest
 from sqlalchemy.orm import Session
-from sqlalchemy import Table, Column, Integer, String, DateTime, ForeignKey, Index, JSON, text
-from sqlalchemy.sql import func
 
 from app.services.audit_service import AuditService, audit_service
 from app.models.audit_log import AuditLog
 from app.models.user import User
-from app.utils.database import Base
 
 
 @pytest.fixture(scope="function", autouse=True)
 def setup_audit_tables(db_session):
     """
-    Create only the tables needed for audit tests (User and AuditLog).
-    This avoids issues with PostgreSQL-specific types (ARRAY, JSONB) in SQLite.
-    For SQLite, we create a compatible version of the audit_logs table using JSON instead of JSONB.
+    Create tables needed for audit tests (User and AuditLog).
+    
+    Uses ORM model creation - custom JSONBType handles SQLite compatibility
+    automatically (JSONB -> JSON text).
     """
     # Create User table first (AuditLog has FK to it)
     User.__table__.create(bind=db_session.bind, checkfirst=True)
     
-    # For SQLite compatibility, create audit_logs table with JSON instead of JSONB
-    # Use raw SQL to create a SQLite-compatible version
-    from sqlalchemy import inspect as sqlalchemy_inspect
-    inspector = sqlalchemy_inspect(db_session.bind)
-    if 'audit_logs' not in inspector.get_table_names():
-        # Create table with SQLite-compatible SQL (JSON instead of JSONB)
-        create_table_sql = """
-        CREATE TABLE audit_logs (
-            id INTEGER NOT NULL PRIMARY KEY,
-            actor_id INTEGER,
-            action VARCHAR(255) NOT NULL,
-            target_type VARCHAR(50),
-            target_id INTEGER,
-            meta JSON,
-            request_id VARCHAR(255),
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(actor_id) REFERENCES users(id) ON DELETE SET NULL
-        )
-        """
-        db_session.execute(text(create_table_sql))
-        # Create indexes
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_actor_id ON audit_logs(actor_id)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_action ON audit_logs(action)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_target_type ON audit_logs(target_type)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_target_id ON audit_logs(target_id)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_request_id ON audit_logs(request_id)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs(created_at)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_action ON audit_logs(actor_id, action)"))
-        db_session.execute(text("CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_type, target_id)"))
-        db_session.commit()
+    # Create AuditLog table - JSONBType handles SQLite automatically
+    AuditLog.__table__.create(bind=db_session.bind, checkfirst=True)
     
     yield
     
     # Clean up
     try:
-        db_session.execute(text("DROP TABLE IF EXISTS audit_logs"))
-        db_session.commit()
-    except Exception:
-        pass
-    try:
+        AuditLog.__table__.drop(bind=db_session.bind, checkfirst=True)
         User.__table__.drop(bind=db_session.bind, checkfirst=True)
     except Exception:
         pass

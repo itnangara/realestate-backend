@@ -2,31 +2,42 @@
 Notification Service for sending emails via AWS SES
 
 Handles:
-- Email notifications for role approvals/rejections
+- Email sending via AWS SES
+- Role approval/rejection notifications
 - KYC approval/rejection notifications
-- Template-based email sending
+- Template generation (text and HTML)
+- Error handling and graceful degradation
 """
 
 import boto3
 from botocore.exceptions import ClientError
 from decouple import config
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class NotificationService:
-    """Service for sending notifications via AWS SES"""
+    """
+    Service for sending email notifications via AWS SES
+    
+    Features:
+    - Singleton pattern for consistent instance
+    - Graceful degradation when SES unavailable
+    - Text and HTML email support
+    - Template-based notifications
+    """
     
     def __init__(self):
-        """Initialize SES client with credentials from environment"""
+        """Initialize NotificationService with AWS SES client"""
         self.aws_access_key_id = config("AWS_ACCESS_KEY_ID", default=None)
         self.aws_secret_access_key = config("AWS_SECRET_ACCESS_KEY", default=None)
         self.aws_region = config("AWS_REGION", default="us-east-1")
-        self.from_email = config("AWS_SES_FROM_EMAIL", default="noreply@example.com")
+        self.from_email = config("AWS_SES_FROM_EMAIL", default=None)
         
-        # Initialize SES client
+        # Initialize SES client if credentials available
+        self.ses_client = None
         if self.aws_access_key_id and self.aws_secret_access_key:
             try:
                 self.ses_client = boto3.client(
@@ -35,16 +46,23 @@ class NotificationService:
                     aws_secret_access_key=self.aws_secret_access_key,
                     region_name=self.aws_region
                 )
+                logger.info(
+                    "notification_service_initialized",
+                    region=self.aws_region,
+                    from_email=self.from_email
+                )
             except Exception as e:
                 logger.warning(
-                    "ses_client_initialization_failed",
+                    "notification_service_ses_client_failed",
                     error=str(e),
-                    message="SES client initialization failed - notifications will not work"
+                    message="SES client initialization failed - notifications will be disabled"
                 )
                 self.ses_client = None
         else:
-            logger.warning("AWS credentials not configured - SES service will not work")
-            self.ses_client = None
+            logger.warning(
+                "notification_service_no_credentials",
+                message="AWS credentials not configured - notifications will be disabled"
+            )
     
     def send_email(
         self,
@@ -54,7 +72,7 @@ class NotificationService:
         body_html: Optional[str] = None
     ) -> bool:
         """
-        Send email via AWS SES
+        Send an email via AWS SES
         
         Args:
             to_email: Recipient email address
@@ -67,30 +85,51 @@ class NotificationService:
         """
         if not self.ses_client:
             logger.warning(
-                "email_not_sent_ses_unavailable",
+                "email_send_skipped_ses_unavailable",
+                to_email=to_email,
+                subject=subject
+            )
+            return False
+        
+        if not self.from_email:
+            logger.error(
+                "email_send_failed_no_from_email",
                 to_email=to_email,
                 subject=subject
             )
             return False
         
         try:
-            destination = {"ToAddresses": [to_email]}
             message = {
-                "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {"Text": {"Data": body_text, "Charset": "UTF-8"}}
+                "Subject": {
+                    "Data": subject,
+                    "Charset": "UTF-8"
+                },
+                "Body": {
+                    "Text": {
+                        "Data": body_text,
+                        "Charset": "UTF-8"
+                    }
+                }
             }
             
+            # Add HTML body if provided
             if body_html:
-                message["Body"]["Html"] = {"Data": body_html, "Charset": "UTF-8"}
+                message["Body"]["Html"] = {
+                    "Data": body_html,
+                    "Charset": "UTF-8"
+                }
             
             response = self.ses_client.send_email(
                 Source=self.from_email,
-                Destination=destination,
+                Destination={
+                    "ToAddresses": [to_email]
+                },
                 Message=message
             )
             
             logger.info(
-                "email_sent",
+                "email_sent_successfully",
                 to_email=to_email,
                 subject=subject,
                 message_id=response.get("MessageId")
@@ -100,16 +139,17 @@ class NotificationService:
             
         except ClientError as e:
             logger.error(
-                "email_send_failed",
+                "email_send_failed_client_error",
                 to_email=to_email,
                 subject=subject,
                 error_code=e.response.get("Error", {}).get("Code"),
                 error_message=e.response.get("Error", {}).get("Message")
             )
             return False
+            
         except Exception as e:
             logger.error(
-                "email_send_unexpected_error",
+                "email_send_failed_unexpected_error",
                 to_email=to_email,
                 subject=subject,
                 error=str(e),
@@ -124,45 +164,55 @@ class NotificationService:
         approved_roles: List[str]
     ) -> bool:
         """
-        Send notification for role approval
+        Send role approval notification email
         
         Args:
-            to_email: Recipient email address
-            user_name: User's name
+            to_email: User email address
+            user_name: User's full name
             approved_roles: List of approved role names
             
         Returns:
-            True if email sent successfully
+            True if email sent successfully, False otherwise
         """
-        subject = f"Role Request Approved - {', '.join(approved_roles)}"
+        roles_str = ", ".join(approved_roles)
+        subject = f"Role Request Approved - {roles_str}"
         
+        # Generate text body
         body_text = f"""
-Hello {user_name},
+Dear {user_name},
 
-Your role request has been approved!
+Your role request has been approved! You have been granted the following role(s):
 
-Approved roles: {', '.join(approved_roles)}
+{roles_str}
 
 You can now access features associated with these roles.
 
 Thank you,
 Real Estate Platform Team
-        """.strip()
+"""
         
+        # Generate HTML body
         body_html = f"""
 <html>
 <body>
     <h2>Role Request Approved</h2>
-    <p>Hello {user_name},</p>
-    <p>Your role request has been approved!</p>
-    <p><strong>Approved roles:</strong> {', '.join(approved_roles)}</p>
+    <p>Dear {user_name},</p>
+    <p>Your role request has been approved! You have been granted the following role(s):</p>
+    <ul>
+        {''.join(f'<li>{role}</li>' for role in approved_roles)}
+    </ul>
     <p>You can now access features associated with these roles.</p>
     <p>Thank you,<br>Real Estate Platform Team</p>
 </body>
 </html>
-        """.strip()
+"""
         
-        return self.send_email(to_email, subject, body_text, body_html)
+        return self.send_email(
+            to_email=to_email,
+            subject=subject,
+            body_text=body_text.strip(),
+            body_html=body_html.strip()
+        )
     
     def send_role_rejection_notification(
         self,
@@ -172,52 +222,67 @@ Real Estate Platform Team
         reason: Optional[str] = None
     ) -> bool:
         """
-        Send notification for role rejection
+        Send role rejection notification email
         
         Args:
-            to_email: Recipient email address
-            user_name: User's name
+            to_email: User email address
+            user_name: User's full name
             rejected_roles: List of rejected role names
             reason: Optional rejection reason
             
         Returns:
-            True if email sent successfully
+            True if email sent successfully, False otherwise
         """
-        subject = f"Role Request Rejected - {', '.join(rejected_roles)}"
+        roles_str = ", ".join(rejected_roles)
+        subject = f"Role Request Rejected - {roles_str}"
         
+        # Generate text body
         body_text = f"""
-Hello {user_name},
+Dear {user_name},
 
-Your role request has been rejected.
+We regret to inform you that your role request for the following role(s) has been rejected:
 
-Rejected roles: {', '.join(rejected_roles)}
-        """.strip()
+{roles_str}
+"""
         
         if reason:
-            body_text += f"\n\nReason: {reason}"
+            body_text += f"\nReason: {reason}\n"
         
-        body_text += "\n\nIf you have questions, please contact support.\n\nThank you,\nReal Estate Platform Team"
+        body_text += """
+If you believe this is an error or would like to provide additional information, please contact our support team.
+
+Thank you,
+Real Estate Platform Team
+"""
         
+        # Generate HTML body
         body_html = f"""
 <html>
 <body>
-    <h2>Role Request Rejected</h2>
-    <p>Hello {user_name},</p>
-    <p>Your role request has been rejected.</p>
-    <p><strong>Rejected roles:</strong> {', '.join(rejected_roles)}</p>
-        """.strip()
+    <h2>Role Request Update</h2>
+    <p>Dear {user_name},</p>
+    <p>We regret to inform you that your role request for the following role(s) has been rejected:</p>
+    <ul>
+        {''.join(f'<li>{role}</li>' for role in rejected_roles)}
+    </ul>
+"""
         
         if reason:
             body_html += f"<p><strong>Reason:</strong> {reason}</p>"
         
         body_html += """
-    <p>If you have questions, please contact support.</p>
+    <p>If you believe this is an error or would like to provide additional information, please contact our support team.</p>
     <p>Thank you,<br>Real Estate Platform Team</p>
 </body>
 </html>
-        """.strip()
+"""
         
-        return self.send_email(to_email, subject, body_text, body_html)
+        return self.send_email(
+            to_email=to_email,
+            subject=subject,
+            body_text=body_text.strip(),
+            body_html=body_html.strip()
+        )
     
     def send_kyc_approval_notification(
         self,
@@ -225,41 +290,48 @@ Rejected roles: {', '.join(rejected_roles)}
         user_name: str
     ) -> bool:
         """
-        Send notification for KYC approval
+        Send KYC approval notification email
         
         Args:
-            to_email: Recipient email address
-            user_name: User's name
+            to_email: User email address
+            user_name: User's full name
             
         Returns:
-            True if email sent successfully
+            True if email sent successfully, False otherwise
         """
         subject = "KYC Verification Approved"
         
+        # Generate text body
         body_text = f"""
-Hello {user_name},
+Dear {user_name},
 
-Your KYC (Know Your Customer) verification has been approved.
+Your KYC (Know Your Customer) verification has been approved!
 
-You can now proceed with your role requests.
+Your identity documents have been verified and you can now proceed with your role requests.
 
 Thank you,
 Real Estate Platform Team
-        """.strip()
+"""
         
+        # Generate HTML body
         body_html = f"""
 <html>
 <body>
     <h2>KYC Verification Approved</h2>
-    <p>Hello {user_name},</p>
-    <p>Your KYC (Know Your Customer) verification has been approved.</p>
-    <p>You can now proceed with your role requests.</p>
+    <p>Dear {user_name},</p>
+    <p>Your KYC (Know Your Customer) verification has been approved!</p>
+    <p>Your identity documents have been verified and you can now proceed with your role requests.</p>
     <p>Thank you,<br>Real Estate Platform Team</p>
 </body>
 </html>
-        """.strip()
+"""
         
-        return self.send_email(to_email, subject, body_text, body_html)
+        return self.send_email(
+            to_email=to_email,
+            subject=subject,
+            body_text=body_text.strip(),
+            body_html=body_html.strip()
+        )
     
     def send_kyc_rejection_notification(
         self,
@@ -268,48 +340,63 @@ Real Estate Platform Team
         reason: Optional[str] = None
     ) -> bool:
         """
-        Send notification for KYC rejection
+        Send KYC rejection notification email
         
         Args:
-            to_email: Recipient email address
-            user_name: User's name
+            to_email: User email address
+            user_name: User's full name
             reason: Optional rejection reason
             
         Returns:
-            True if email sent successfully
+            True if email sent successfully, False otherwise
         """
         subject = "KYC Verification Rejected"
         
+        # Generate text body
         body_text = f"""
-Hello {user_name},
+Dear {user_name},
 
-Your KYC (Know Your Customer) verification has been rejected.
-        """.strip()
+We regret to inform you that your KYC (Know Your Customer) verification has been rejected.
+"""
         
         if reason:
-            body_text += f"\n\nReason: {reason}"
+            body_text += f"\nReason: {reason}\n"
         
-        body_text += "\n\nPlease review your documents and submit again if needed.\n\nThank you,\nReal Estate Platform Team"
+        body_text += """
+Please ensure your documents are clear, valid, and match the information provided. You may resubmit your documents for verification.
+
+If you have questions, please contact our support team.
+
+Thank you,
+Real Estate Platform Team
+"""
         
+        # Generate HTML body
         body_html = f"""
 <html>
 <body>
-    <h2>KYC Verification Rejected</h2>
-    <p>Hello {user_name},</p>
-    <p>Your KYC (Know Your Customer) verification has been rejected.</p>
-        """.strip()
+    <h2>KYC Verification Update</h2>
+    <p>Dear {user_name},</p>
+    <p>We regret to inform you that your KYC (Know Your Customer) verification could not be completed.</p>
+"""
         
         if reason:
             body_html += f"<p><strong>Reason:</strong> {reason}</p>"
         
         body_html += """
-    <p>Please review your documents and submit again if needed.</p>
+    <p>Please ensure your documents are clear, valid, and match the information provided. You may resubmit your documents for verification.</p>
+    <p>If you have questions, please contact our support team.</p>
     <p>Thank you,<br>Real Estate Platform Team</p>
 </body>
 </html>
-        """.strip()
+"""
         
-        return self.send_email(to_email, subject, body_text, body_html)
+        return self.send_email(
+            to_email=to_email,
+            subject=subject,
+            body_text=body_text.strip(),
+            body_html=body_html.strip()
+        )
 
 
 # Singleton instance
