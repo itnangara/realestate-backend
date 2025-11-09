@@ -10,7 +10,10 @@ def test_get_properties(client):
     response = client.get("/api/properties")
     
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "properties" in data
+    assert isinstance(data["properties"], list)
 
 
 def test_get_properties_with_filters(client):
@@ -18,7 +21,10 @@ def test_get_properties_with_filters(client):
     response = client.get("/api/properties?city=New York&property_type=house&min_price=100000&max_price=500000")
     
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "properties" in data
+    assert isinstance(data["properties"], list)
 
 
 def test_get_properties_pagination(client):
@@ -26,20 +32,24 @@ def test_get_properties_pagination(client):
     response = client.get("/api/properties?skip=0&limit=5")
     
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    data = response.json()
+    assert isinstance(data, dict)
+    assert "properties" in data
+    assert isinstance(data["properties"], list)
 
 
 def test_get_property_by_id(client):
     """Test getting specific property"""
     # First get properties to find an ID
     properties_response = client.get("/api/properties")
-    if properties_response.json():
-        property_id = properties_response.json()[0]["id"]
+    data = properties_response.json()
+    if isinstance(data, dict) and data.get("properties"):
+        property_id = data["properties"][0]["id"]
         
         response = client.get(f"/api/properties/{property_id}")
         assert response.status_code == 200
-        data = response.json()
-        assert data["id"] == property_id
+        property_data = response.json()
+        assert property_data["id"] == property_id
 
 
 def test_get_property_nonexistent(client):
@@ -164,7 +174,7 @@ def test_update_property_unauthorized(client, agent_headers, buyer_headers, db_s
     response = client.put(f"/api/properties/{property_id}", json=update_data, headers=buyer_headers)
     
     assert response.status_code == 403
-    assert "Not enough permissions" in response.json()["detail"]
+    assert "permission" in response.json()["detail"].lower()
 
 
 def test_delete_property(client, agent_headers, db_session):
@@ -215,7 +225,7 @@ def test_delete_property_unauthorized(client, agent_headers, buyer_headers, db_s
     response = client.delete(f"/api/properties/{property_id}", headers=buyer_headers)
     
     assert response.status_code == 403
-    assert "Not enough permissions" in response.json()["detail"]
+    assert "permission" in response.json()["detail"].lower()
 
 
 def test_search_properties(client):
@@ -273,16 +283,18 @@ def test_listing_type_filter_get(client, agent_headers, db_session):
     response = client.get("/api/properties?listing_type=for_sale")
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
-    if data:
-        assert all(p.get("listing_type") == "for_sale" for p in data)
+    assert isinstance(data, dict)
+    assert "properties" in data
+    if data["properties"]:
+        assert all(p.get("listing_type") == "for_sale" for p in data["properties"])
     
     response = client.get("/api/properties?listing_type=for_rent")
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data, list)
-    if data:
-        assert all(p.get("listing_type") == "for_rent" for p in data)
+    assert isinstance(data, dict)
+    assert "properties" in data
+    if data["properties"]:
+        assert all(p.get("listing_type") == "for_rent" for p in data["properties"])
 
 
 def test_listing_type_filter_search_get(client, agent_headers, db_session):
@@ -372,11 +384,11 @@ def test_listing_type_filter_search_post(client, agent_headers, db_session):
         assert all(p.get("listing_type") == "for_sale" for p in data["properties"])
 
 
-def test_listing_type_all_values(client, agent_headers, db_session):
+def test_listing_type_all_values(client, agent_headers, admin_headers, db_session):
     """Test all listing_type enum values can be created"""
-    listing_types = ["for_sale", "for_rent", "for_lease", "for_auction"]
-    
-    for listing_type in listing_types:
+    # Agent can create for_sale and for_rent
+    agent_listing_types = ["for_sale", "for_rent"]
+    for listing_type in agent_listing_types:
         property_data = {
             "title": f"Property {listing_type}",
             "description": f"A property {listing_type}",
@@ -391,6 +403,27 @@ def test_listing_type_all_values(client, agent_headers, db_session):
         }
         
         response = client.post("/api/properties", json=property_data, headers=agent_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["listing_type"] == listing_type
+    
+    # Admin can create all listing types including for_lease and for_auction
+    admin_listing_types = ["for_lease", "for_auction"]
+    for listing_type in admin_listing_types:
+        property_data = {
+            "title": f"Property {listing_type}",
+            "description": f"A property {listing_type}",
+            "property_type": "house",
+            "listing_type": listing_type,
+            "status": "draft",
+            "address": f"123 {listing_type} St",
+            "city": "Test City",
+            "state": "TS",
+            "zip_code": "12345",
+            "price": 300000
+        }
+        
+        response = client.post("/api/properties", json=property_data, headers=admin_headers)
         assert response.status_code == 201
         data = response.json()
         assert data["listing_type"] == listing_type

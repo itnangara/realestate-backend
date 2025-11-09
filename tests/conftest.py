@@ -243,13 +243,14 @@ def agent_headers(agent_token):
 
 
 @pytest.fixture(scope="function")
-def test_property(client, buyer_headers):
+def test_property(client, agent_headers):
     """Create a test property for use in tests"""
     property_data = {
         "title": "Test Property",
         "description": "Property for testing",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -257,6 +258,6 @@ def test_property(client, buyer_headers):
         "price": 400000
     }
     
-    response = client.post("/api/properties", json=property_data, headers=buyer_headers)
+    response = client.post("/api/properties", json=property_data, headers=agent_headers)
     assert response.status_code == 201
     return response.json()

@@ -303,22 +303,16 @@ class TestComprehensiveRoleAwareScenarios:
     def test_seller_sees_active_and_own_properties(
         self, client, seller_headers, db_session, test_roles, test_properties_setup, test_user_seller
     ):
-        """Seller: All own listings (any status except DELETED) + public ACTIVE"""
+        """Seller: Only own listings (any status except DELETED) - 'My Listings' mode"""
         response = client.get("/api/properties/", headers=seller_headers)
         assert response.status_code == 200
         data = response.json()
         
-        # Should see:
-        # - 2 public ACTIVE listings (from other owners)
+        # Should see ONLY own properties (any status except DELETED)
         # - 3 own properties (DRAFT, ACTIVE, SOLD) - but NOT DELETED
-        # Note: Seller's Active Property is counted in both public and own, but query deduplicates
-        # Total: 5 properties (2 public + 3 own, but seller's active is public so it's included)
-        assert data["total_count"] == 5
+        # Total: 3 properties (only own, not public listings)
+        assert data["total_count"] == 3
         property_titles = [p["title"] for p in data["properties"]]
-        
-        # Public listings
-        assert "Public Active For Sale" in property_titles
-        assert "Public Active For Rent" in property_titles
         
         # Own properties (except deleted)
         assert "Seller's Draft Property" in property_titles
@@ -327,6 +321,8 @@ class TestComprehensiveRoleAwareScenarios:
         
         # Should NOT see:
         assert "Deleted Property" not in property_titles  # Own but deleted
+        assert "Public Active For Sale" not in property_titles  # Not own
+        assert "Public Active For Rent" not in property_titles  # Not own
         assert "Other Owner's Draft" not in property_titles  # Not own
         assert "Portfolio Property" not in property_titles  # Not own and not public
     

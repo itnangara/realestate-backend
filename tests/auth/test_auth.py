@@ -38,8 +38,8 @@ def test_register_duplicate_email(client, test_user_buyer):
     }
     
     response = client.post("/api/auth/register", json=user_data)
-    assert response.status_code == 400
-    assert "Email already registered" in response.json()["detail"]
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"].lower()
 
 
 def test_register_duplicate_username(client, test_user_buyer):

@@ -190,12 +190,12 @@ class TestRoleAwarePropertyListing:
         assert response.status_code == 200
         data = response.json()
         
-        # Should see public active + own draft (2 properties)
-        assert data["total_count"] == 2
+        # Should see ONLY own draft (1 property) - "My Listings" mode
+        assert data["total_count"] == 1
         property_titles = [p["title"] for p in data["properties"]]
-        assert "Public Property" in property_titles
         assert "My Draft" in property_titles
-        assert "Other Draft" not in property_titles
+        assert "Public Property" not in property_titles  # Not own
+        assert "Other Draft" not in property_titles  # Not own
     
     def test_admin_sees_all_properties(self, client, admin_headers, db_session, test_roles):
         """Admin should see all properties including deleted"""

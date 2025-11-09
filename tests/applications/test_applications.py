@@ -5,13 +5,14 @@ Application endpoint tests
 import pytest
 
 
-def create_test_property(client, headers):
-    """Helper function to create a test property"""
+def create_test_property(client, agent_headers):
+    """Helper function to create a test property - uses agent_headers since buyers can't create properties"""
     property_data = {
         "title": "Test Property",
         "description": "Property for testing applications",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -19,15 +20,15 @@ def create_test_property(client, headers):
         "price": 400000
     }
     
-    response = client.post("/api/properties", json=property_data, headers=headers)
+    response = client.post("/api/properties", json=property_data, headers=agent_headers)
     assert response.status_code == 201
     return response.json()["id"]
 
 
-def test_create_application(client, buyer_headers, db_session):
+def test_create_application(client, buyer_headers, agent_headers, db_session):
     """Test creating application"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     application_data = {
         "property_id": property_id,
@@ -56,10 +57,10 @@ def test_create_application(client, buyer_headers, db_session):
     assert data["applicant_id"] is not None
 
 
-def test_create_application_unauthorized(client, buyer_headers):
+def test_create_application_unauthorized(client, buyer_headers, agent_headers):
     """Test creating application without authentication"""
-    # Create property first using valid headers
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first using agent headers (buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     application_data = {
         "property_id": property_id,
@@ -86,10 +87,10 @@ def test_get_user_applications_unauthorized(client):
     assert response.status_code == 401
 
 
-def test_get_application_by_id(client, buyer_headers, db_session):
+def test_get_application_by_id(client, buyer_headers, agent_headers, db_session):
     """Test getting specific application"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     # First create an application
     application_data = {
@@ -119,8 +120,8 @@ def test_get_application_nonexistent(client, buyer_headers):
 
 def test_get_application_unauthorized(client, buyer_headers, agent_headers, db_session):
     """Test getting application from different user"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     # Create application as buyer
     application_data = {
@@ -138,10 +139,10 @@ def test_get_application_unauthorized(client, buyer_headers, agent_headers, db_s
     assert "Not enough permissions" in response.json()["detail"]
 
 
-def test_update_application(client, buyer_headers, db_session):
+def test_update_application(client, buyer_headers, agent_headers, db_session):
     """Test updating application"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     # First create an application
     application_data = {
@@ -168,8 +169,8 @@ def test_update_application(client, buyer_headers, db_session):
 
 def test_update_application_unauthorized(client, buyer_headers, agent_headers, db_session):
     """Test updating application from different user"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     # Create application as buyer
     application_data = {
@@ -189,10 +190,10 @@ def test_update_application_unauthorized(client, buyer_headers, agent_headers, d
     assert "Not enough permissions" in response.json()["detail"]
 
 
-def test_delete_application(client, buyer_headers, db_session):
+def test_delete_application(client, buyer_headers, agent_headers, db_session):
     """Test deleting application"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     # First create an application
     application_data = {
@@ -211,8 +212,8 @@ def test_delete_application(client, buyer_headers, db_session):
 
 def test_delete_application_unauthorized(client, buyer_headers, agent_headers, db_session):
     """Test deleting application from different user"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     # Create application as buyer
     application_data = {
@@ -244,10 +245,10 @@ def test_application_validation(client, buyer_headers):
     assert response.status_code == 422  # Validation error
 
 
-def test_application_with_documents(client, buyer_headers):
+def test_application_with_documents(client, buyer_headers, agent_headers):
     """Test application with document URLs"""
-    # Create property first
-    property_id = create_test_property(client, buyer_headers)
+    # Create property first (using agent since buyers can't create properties)
+    property_id = create_test_property(client, agent_headers)
     
     application_data = {
         "property_id": property_id,
