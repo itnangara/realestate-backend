@@ -157,3 +157,4 @@ logs/
 tmp/
 temp/
 .cursorrules
+env.example
