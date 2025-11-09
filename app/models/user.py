@@ -2,10 +2,11 @@
 Industry-standard User model for real estate application
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, JSON, Enum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.utils.database import Base
+import enum
 # Type hints are handled by SQLAlchemy Column definitions
 
 # Role constants for consistency
@@ -21,6 +22,14 @@ class UserRoles:
     
     # All available roles
     ALL_ROLES = [BUYER, SELLER, AGENT, LANDLORD, TENANT, INVESTOR, ADMIN]
+
+
+class UserStatus(str, enum.Enum):
+    """User status enum - represents the account lifecycle stage"""
+    PENDING = "pending"
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    BANNED = "banned"
 
 class User(Base):
     """User model optimized for multi-role system and FastAPI integration."""
@@ -39,6 +48,12 @@ class User(Base):
     profile_image_url = Column(String(500), nullable=True)
     
     # User roles and permissions - relational approach + profile tables
+    status = Column(
+        Enum(UserStatus, native_enum=True),
+        default=UserStatus.PENDING,
+        nullable=False,
+        index=True
+    )
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
     is_premium = Column(Boolean, default=False, nullable=False)
