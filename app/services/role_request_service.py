@@ -110,8 +110,22 @@ class RoleRequestService:
             requested_roles=requested_roles
         )
         
-        # TODO: Phase 5 - Enqueue async job for role processing
-        # await process_role_request.delay(role_request.id)
+        # Enqueue async job for role processing
+        try:
+            from app.tasks.role_tasks import process_role_request
+            process_role_request.delay(role_request.id)
+            logger.info(
+                "role_request_processing_queued",
+                role_request_id=role_request.id
+            )
+        except Exception as e:
+            # Log error but don't fail the request creation
+            logger.error(
+                "failed_to_enqueue_role_request_processing",
+                role_request_id=role_request.id,
+                error=str(e),
+                exc_info=True
+            )
         
         return role_request
     

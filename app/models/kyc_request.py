@@ -5,9 +5,9 @@ KYC Request model for Know Your Customer verification workflow
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Enum as SQLEnum
 from app.utils.database import Base
+from app.utils.types import JSONBType
 import enum
 
 
@@ -44,8 +44,9 @@ class KYCRequest(Base):
     )
     
     # Provider response data
-    verdict = Column(JSONB, nullable=True)  # Provider verdict payload
-    raw_response = Column(JSONB, nullable=True)  # Full provider response for search/indexing
+    # Uses JSONBType for database-agnostic support (PostgreSQL JSONB, SQLite JSON)
+    verdict = Column(JSONBType, nullable=True)  # Provider verdict payload
+    raw_response = Column(JSONBType, nullable=True)  # Full provider response for search/indexing
     
     # Timestamps
     submitted_at = Column(DateTime(timezone=True), nullable=True)

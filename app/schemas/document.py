@@ -3,7 +3,7 @@ Document schemas for API requests and responses
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from app.models.document import DocumentType, DocumentStatus
 
@@ -61,6 +61,6 @@ class DocumentDownloadResponse(BaseModel):
 
 class DocumentListResponse(BaseModel):
     """Response schema for listing user documents"""
-    documents: list[DocumentResponse]
+    documents: List[DocumentResponse]
     total: int
 

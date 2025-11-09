@@ -387,8 +387,23 @@ class KYCService:
             status=kyc_request.status.value
         )
         
-        # TODO: Phase 5 - Trigger evaluate_kyc_verdict Celery task
-        # await evaluate_kyc_verdict.delay(kyc_request.id, verdict)
+        # Trigger evaluate_kyc_verdict Celery task
+        try:
+            from app.tasks.kyc_tasks import evaluate_kyc_verdict
+            evaluate_kyc_verdict.delay(kyc_request.id, verdict)
+            logger.info(
+                "kyc_verdict_evaluation_queued",
+                kyc_request_id=kyc_request.id,
+                provider_reference=provider_reference
+            )
+        except Exception as e:
+            # Log error but don't fail webhook processing
+            logger.error(
+                "failed_to_enqueue_kyc_verdict_evaluation",
+                kyc_request_id=kyc_request.id,
+                error=str(e),
+                exc_info=True
+            )
         
         return kyc_request
 

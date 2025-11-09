@@ -5,8 +5,8 @@ Audit Log model for immutable audit trail
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
 from app.utils.database import Base
+from app.utils.types import JSONBType
 
 
 class AuditLog(Base):
@@ -29,7 +29,8 @@ class AuditLog(Base):
     target_id = Column(Integer, nullable=True, index=True)  # ID of the target entity
     
     # Structured metadata (JSONB for querying)
-    meta = Column(JSONB, nullable=True)  # Additional context, request details, etc.
+    # Uses JSONBType for database-agnostic support (PostgreSQL JSONB, SQLite JSON)
+    meta = Column(JSONBType, nullable=True)  # Additional context, request details, etc.
     
     # Request correlation
     request_id = Column(String(255), nullable=True, index=True)  # For correlating with HTTP request IDs

@@ -20,7 +20,8 @@ logger = get_logger(__name__)
 
 def get_kyc_service(db: Session = Depends(get_db)) -> KYCService:
     """Dependency to get KYC service instance"""
-    provider = MockKYCProvider()  # In production, use configured provider
+    from app.services.kyc_provider_factory import get_kyc_provider
+    provider = get_kyc_provider()  # Uses configured provider from environment
     return KYCService(db, provider)
 
 

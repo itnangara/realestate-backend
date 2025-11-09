@@ -5,9 +5,10 @@ Role Request model for multi-role onboarding workflow
 from sqlalchemy import Column, Integer, String, DateTime, Text, Float, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Enum as SQLEnum
 from app.utils.database import Base
+from app.utils.types import ArrayType, JSONBType
 import enum
 
 
@@ -31,7 +32,8 @@ class RoleRequest(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Requested roles as array (e.g., ['seller', 'agent'])
-    requested_roles = Column(ARRAY(String), nullable=False)
+    # Uses ArrayType for database-agnostic support (PostgreSQL ARRAY, SQLite JSON)
+    requested_roles = Column(ArrayType(String), nullable=False)
     
     # Status tracking
     status = Column(
@@ -50,7 +52,8 @@ class RoleRequest(Base):
     notes = Column(Text, nullable=True)
     
     # Attachments and metadata
-    attachments = Column(JSONB, nullable=True)  # Array of document IDs
+    # Uses JSONBType for database-agnostic support (PostgreSQL JSONB, SQLite JSON)
+    attachments = Column(JSONBType, nullable=True)  # Array of document IDs
     trust_score = Column(Float, default=0.0, nullable=False)
     
     # Relationships

@@ -10,7 +10,7 @@ Handles:
 import boto3
 from botocore.exceptions import ClientError
 from decouple import config
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -121,7 +121,7 @@ class NotificationService:
         self,
         to_email: str,
         user_name: str,
-        approved_roles: list[str]
+        approved_roles: List[str]
     ) -> bool:
         """
         Send notification for role approval
@@ -168,7 +168,7 @@ Real Estate Platform Team
         self,
         to_email: str,
         user_name: str,
-        rejected_roles: list[str],
+        rejected_roles: List[str],
         reason: Optional[str] = None
     ) -> bool:
         """
