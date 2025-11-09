@@ -2,16 +2,17 @@
 Property Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, validator, root_validator, ConfigDict, Field, conint, confloat
+from pydantic import BaseModel, validator, root_validator, ConfigDict, Field, conint, confloat, model_validator
 from typing import Optional, List
 from datetime import datetime
-from app.models.property import PropertyType, PropertyStatus
+from app.models.property import PropertyType, PropertyStatus, ListingType
 
 class PropertyBase(BaseModel):
     """Base property schema"""
     title: str
     description: Optional[str] = None
     property_type: PropertyType
+    listing_type: Optional[ListingType] = None
     status: PropertyStatus = PropertyStatus.DRAFT
     
     # Location
@@ -46,6 +47,7 @@ class PropertyUpdate(BaseModel):
     """Schema for updating a property"""
     title: Optional[str] = None
     description: Optional[str] = None
+    listing_type: Optional[ListingType] = None
     status: Optional[PropertyStatus] = None
     address: Optional[str] = None
     city: Optional[str] = None
@@ -111,7 +113,9 @@ class PropertySearchFilters(BaseModel):
     # Features filter
     features: Optional[str] = Field(None, description="Comma-separated list of features")
     
-    # Status & metadata
+    # Listing type & status filters
+    listing_type: Optional[ListingType] = Field(None, description="Listing type (for_sale, for_rent, etc.) - single value for backward compatibility")
+    listing_types: Optional[List[ListingType]] = Field(None, description="List of listing types (for_sale, for_rent, etc.) - supports multiple values with OR logic")
     status: Optional[PropertyStatus] = Field(None, description="Property status")
     is_featured: Optional[bool] = Field(None, description="Featured properties only")
     year_built_min: Optional[conint(ge=1800, le=2030)] = Field(None, description="Minimum year built")
@@ -122,6 +126,13 @@ class PropertySearchFilters(BaseModel):
     limit: conint(ge=1, le=100) = Field(20, description="Items per page")
     sort_by: str = Field("created_at", description="Sort field")
     sort_order: str = Field("desc", description="Sort order: asc or desc")
+    
+    @model_validator(mode='after')
+    def validate_listing_type_exclusivity(self):
+        """Ensure listing_type and listing_types are not both provided"""
+        if self.listing_type is not None and self.listing_types is not None:
+            raise ValueError("Cannot use both 'listing_type' and 'listing_types'. Use 'listing_types' for multiple values.")
+        return self
 
 class PropertySearchResponse(BaseModel):
     """Response schema for property search results"""
@@ -130,6 +141,8 @@ class PropertySearchResponse(BaseModel):
     page: int
     limit: int
     total_pages: int
+    
+    model_config = ConfigDict(from_attributes=True)
 
 # Legacy search schema (keeping for backward compatibility)
 class PropertySearch(BaseModel):
@@ -137,6 +150,7 @@ class PropertySearch(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     property_type: Optional[PropertyType] = None
+    listing_type: Optional[ListingType] = None
     status: Optional[PropertyStatus] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None

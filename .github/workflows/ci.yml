@@ -62,6 +62,9 @@ jobs:
           DATABASE_URL: postgresql://test:test@localhost:5432/test_db
           REDIS_URL: redis://localhost:6379
           SECRET_KEY: test_secret_key_for_ci
+          ACCESS_TOKEN_EXPIRE_MINUTES: 30
+          REFRESH_TOKEN_EXPIRE_DAYS: 30
+          ALGORITHM: HS256
         run: |
           pytest tests/ -v --maxfail=5 --tb=short
       

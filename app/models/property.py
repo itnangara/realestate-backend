@@ -2,16 +2,22 @@
 Property model for real estate listings
 """
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Enum, ForeignKey, JSON
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Enum, ForeignKey, JSON, CheckConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.utils.database import Base
 import enum
-import os
+
+class ListingType(str, enum.Enum):
+    """Listing type enum - defines purpose or transactional intent of a property"""
+    FOR_SALE = "for_sale"
+    FOR_RENT = "for_rent"
+    FOR_LEASE = "for_lease"
+    FOR_AUCTION = "for_auction"
+    FOR_PORTFOLIO = "for_portfolio"
 
 class PropertyType(str, enum.Enum):
-    """Property types enum - comprehensive real estate types"""
+    """Property types enum - defines the type of property"""
     HOUSE = "house"
     APARTMENT = "apartment"
     CONDO = "condo"
@@ -25,15 +31,17 @@ class PropertyType(str, enum.Enum):
     WAREHOUSE = "warehouse"
 
 class PropertyStatus(str, enum.Enum):
-    """Property status enum - simplified real-world statuses"""
-    FOR_SALE = "for_sale"
-    FOR_RENT = "for_rent"
+    """Property status enum - represents the lifecycle stage of a property listing."""
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    ACTIVE = "active"
+    UNDER_OFFER = "under_offer"
     SOLD = "sold"
     RENTED = "rented"
-    PENDING = "pending"
-    DRAFT = "draft"
-    OFF_MARKET = "off_market"
-
+    EXPIRED = "expired"
+    ARCHIVED = "archived"
+    REJECTED = "rejected"
+    DELETED = "deleted"
 
 class Property(Base):
     """
@@ -55,9 +63,10 @@ class Property(Base):
     title = Column(String(200), nullable=False, index=True)
     description = Column(Text, nullable=True)
     
-    # Property classification
-    property_type = Column(Enum(PropertyType), nullable=False, index=True)
-    status = Column(Enum(PropertyStatus), default=PropertyStatus.DRAFT, nullable=False, index=True)
+    # Use native_enum=True for PostgreSQL native enums, and ensure SQLAlchemy uses enum VALUES (not names)
+    property_type = Column(Enum(PropertyType, native_enum=True, values_callable=lambda obj: [e.value for e in obj]), nullable=False, index=True)
+    listing_type = Column(Enum(ListingType, native_enum=True, values_callable=lambda obj: [e.value for e in obj]), nullable=True, index=True)
+    status = Column(Enum(PropertyStatus, native_enum=True, values_callable=lambda obj: [e.value for e in obj]), default=PropertyStatus.DRAFT, nullable=False, index=True)
     
     # Location - comprehensive address system
     address = Column(String(500), nullable=False)
@@ -79,8 +88,8 @@ class Property(Base):
     garage_spaces = Column(Integer, nullable=True)
     
     # Pricing - flexible pricing system
-    price = Column(Float, nullable=True)  # Sale price
-    rent_price = Column(Float, nullable=True)  # Monthly rent
+    price = Column(Float, nullable=True, index=True)  # Sale price
+    rent_price = Column(Float, nullable=True, index=True)  # Monthly rent
     price_per_sqft = Column(Float, nullable=True)
     hoa_fees = Column(Float, nullable=True)  # HOA monthly fees
     property_tax = Column(Float, nullable=True)  # Annual property tax
@@ -126,6 +135,24 @@ class Property(Base):
     agent = relationship("User", foreign_keys=[agent_id])
     applications = relationship("Application", back_populates="property")
     favorites = relationship("Favorite", back_populates="property")
+    
+    # Table-level constraints for data integrity
+    __table_args__ = (
+        CheckConstraint('price IS NULL OR price >= 0', name='check_price_non_negative'),
+        CheckConstraint('rent_price IS NULL OR rent_price >= 0', name='check_rent_price_non_negative'),
+        CheckConstraint('price_per_sqft IS NULL OR price_per_sqft >= 0', name='check_price_per_sqft_non_negative'),
+        CheckConstraint('hoa_fees IS NULL OR hoa_fees >= 0', name='check_hoa_fees_non_negative'),
+        CheckConstraint('property_tax IS NULL OR property_tax >= 0', name='check_property_tax_non_negative'),
+        CheckConstraint('bedrooms IS NULL OR bedrooms >= 0', name='check_bedrooms_non_negative'),
+        CheckConstraint('bathrooms IS NULL OR bathrooms >= 0', name='check_bathrooms_non_negative'),
+        CheckConstraint('square_feet IS NULL OR square_feet > 0', name='check_square_feet_positive'),
+        CheckConstraint('lot_size IS NULL OR lot_size >= 0', name='check_lot_size_non_negative'),
+        CheckConstraint('garage_spaces IS NULL OR garage_spaces >= 0', name='check_garage_spaces_non_negative'),
+        CheckConstraint('views_count >= 0', name='check_views_count_non_negative'),
+        CheckConstraint('latitude IS NULL OR (latitude BETWEEN -90 AND 90)', name='check_latitude_range'),
+        CheckConstraint('longitude IS NULL OR (longitude BETWEEN -180 AND 180)', name='check_longitude_range'),
+    )
+
 
     def __repr__(self):
         return f"<Property(id={self.id}, title='{self.title}', type='{self.property_type}')>"
@@ -138,19 +165,29 @@ class Property(Base):
     @property
     def is_for_sale(self) -> bool:
         """Check if property is for sale"""
-        return self.status in [PropertyStatus.FOR_SALE, PropertyStatus.PENDING]
+        return self.listing_type == ListingType.FOR_SALE if self.listing_type else False
     
     @property
     def is_for_rent(self) -> bool:
         """Check if property is for rent"""
-        return self.status in [PropertyStatus.FOR_RENT, PropertyStatus.PENDING]
+        return self.listing_type == ListingType.FOR_RENT if self.listing_type else False
+    
+    @property
+    def is_for_lease(self) -> bool:
+        """Check if property is for lease"""
+        return self.listing_type == ListingType.FOR_LEASE if self.listing_type else False
+    
+    @property
+    def is_for_auction(self) -> bool:
+        """Check if property is for auction"""
+        return self.listing_type == ListingType.FOR_AUCTION if self.listing_type else False
     
     @property
     def display_price(self) -> str:
         """Get formatted display price"""
-        if self.price:
+        if self.price and self.price > 0:
             return f"${self.price:,.0f}"
-        elif self.rent_price:
+        elif self.rent_price and self.rent_price > 0:
             return f"${self.rent_price:,.0f}/month"
         return "Price on request"
     
@@ -189,23 +226,3 @@ class Property(Base):
     def has_heating(self) -> bool:
         """Check if property has heating from features"""
         return "heating" in (self.features or [])
-    
-    @property
-    def has_garage(self) -> bool:
-        """Check if property has garage from features"""
-        return "garage" in (self.features or [])
-    
-    @property
-    def has_pool(self) -> bool:
-        """Check if property has pool from features"""
-        return "pool" in (self.features or [])
-    
-    @property
-    def has_garden(self) -> bool:
-        """Check if property has garden from features"""
-        return "garden" in (self.features or [])
-    
-    @property
-    def has_balcony(self) -> bool:
-        """Check if property has balcony from features"""
-        return "balcony" in (self.features or [])

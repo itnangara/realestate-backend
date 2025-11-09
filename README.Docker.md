@@ -2,6 +2,7 @@
 
 When you're ready, start the application by running:
 `docker compose up --build`.
+`docker compose up --build -d`
 
 The application will be available at http://localhost:8000.
 

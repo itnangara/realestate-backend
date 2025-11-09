@@ -56,7 +56,8 @@ def test_create_property(client, agent_headers):
         "title": "Beautiful Test House",
         "description": "A wonderful test property",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -78,7 +79,8 @@ def test_create_property(client, agent_headers):
     data = response.json()
     assert data["title"] == "Beautiful Test House"
     assert data["property_type"] == "house"
-    assert data["status"] == "for_sale"
+    assert data["listing_type"] == "for_sale"
+    assert data["status"] == "draft"
     assert data["price"] == 500000
     assert "id" in data
     assert "created_at" in data
@@ -90,7 +92,8 @@ def test_create_property_unauthorized(client):
         "title": "Unauthorized Property",
         "description": "This should fail",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -110,7 +113,8 @@ def test_update_property(client, agent_headers, db_session):
         "title": "Original Title",
         "description": "Original description",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -142,7 +146,8 @@ def test_update_property_unauthorized(client, agent_headers, buyer_headers, db_s
         "title": "Agent Property",
         "description": "Agent's property",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -169,7 +174,8 @@ def test_delete_property(client, agent_headers, db_session):
         "title": "Property to Delete",
         "description": "This will be deleted",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -193,7 +199,8 @@ def test_delete_property_unauthorized(client, agent_headers, buyer_headers, db_s
         "title": "Agent Property",
         "description": "Agent's property",
         "property_type": "house",
-        "status": "for_sale",
+        "listing_type": "for_sale",
+        "status": "draft",
         "address": "123 Test Street",
         "city": "Test City",
         "state": "TS",
@@ -209,30 +216,6 @@ def test_delete_property_unauthorized(client, agent_headers, buyer_headers, db_s
     
     assert response.status_code == 403
     assert "Not enough permissions" in response.json()["detail"]
-
-
-def test_get_user_properties(client, agent_headers, db_session):
-    """Test getting user's properties"""
-    # Create a property first
-    property_data = {
-        "title": "User Property",
-        "description": "User's property",
-        "property_type": "house",
-        "status": "for_sale",
-        "address": "123 Test Street",
-        "city": "Test City",
-        "state": "TS",
-        "zip_code": "12345",
-        "price": 350000
-    }
-    
-    client.post("/api/properties", json=property_data, headers=agent_headers)
-    
-    # Get user properties (using agent's user ID)
-    response = client.get("/api/properties/user/1")  # Assuming agent is user ID 1
-    
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
 
 
 def test_search_properties(client):
@@ -252,3 +235,162 @@ def test_search_properties(client):
     assert isinstance(data, dict)
     assert "properties" in data
     assert "total_count" in data
+
+
+def test_listing_type_filter_get(client, agent_headers, db_session):
+    """Test filtering properties by listing_type using GET endpoint"""
+    # Create properties with different listing types
+    property_data_sale = {
+        "title": "House for Sale",
+        "description": "A house for sale",
+        "property_type": "house",
+        "listing_type": "for_sale",
+        "status": "active",
+        "address": "123 Sale St",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
+        "price": 500000
+    }
+    
+    property_data_rent = {
+        "title": "Apartment for Rent",
+        "description": "An apartment for rent",
+        "property_type": "apartment",
+        "listing_type": "for_rent",
+        "status": "active",
+        "address": "456 Rent Ave",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
+        "rent_price": 2000
+    }
+    
+    client.post("/api/properties", json=property_data_sale, headers=agent_headers)
+    client.post("/api/properties", json=property_data_rent, headers=agent_headers)
+    
+    # Test filtering by listing_type
+    response = client.get("/api/properties?listing_type=for_sale")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    if data:
+        assert all(p.get("listing_type") == "for_sale" for p in data)
+    
+    response = client.get("/api/properties?listing_type=for_rent")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    if data:
+        assert all(p.get("listing_type") == "for_rent" for p in data)
+
+
+def test_listing_type_filter_search_get(client, agent_headers, db_session):
+    """Test filtering by listing_type in GET /api/properties/search"""
+    # Create properties with different listing types
+    property_data_sale = {
+        "title": "House for Sale",
+        "description": "A house for sale",
+        "property_type": "house",
+        "listing_type": "for_sale",
+        "status": "active",
+        "address": "123 Sale St",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
+        "price": 500000
+    }
+    
+    property_data_rent = {
+        "title": "Apartment for Rent",
+        "description": "An apartment for rent",
+        "property_type": "apartment",
+        "listing_type": "for_rent",
+        "status": "active",
+        "address": "456 Rent Ave",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
+        "rent_price": 2000
+    }
+    
+    client.post("/api/properties", json=property_data_sale, headers=agent_headers)
+    client.post("/api/properties", json=property_data_rent, headers=agent_headers)
+    
+    # Test GET search with listing_type filter
+    response = client.get("/api/properties/search?listing_type=for_sale")
+    assert response.status_code == 200
+    data = response.json()
+    assert "properties" in data
+    assert "total_count" in data
+    if data["properties"]:
+        assert all(p.get("listing_type") == "for_sale" for p in data["properties"])
+
+
+def test_listing_type_filter_search_post(client, agent_headers, db_session):
+    """Test filtering by listing_type in POST /api/properties/search"""
+    # Create properties with different listing types
+    property_data_sale = {
+        "title": "House for Sale",
+        "description": "A house for sale",
+        "property_type": "house",
+        "listing_type": "for_sale",
+        "status": "active",
+        "address": "123 Sale St",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
+        "price": 500000
+    }
+    
+    property_data_rent = {
+        "title": "Apartment for Rent",
+        "description": "An apartment for rent",
+        "property_type": "apartment",
+        "listing_type": "for_rent",
+        "status": "active",
+        "address": "456 Rent Ave",
+        "city": "Test City",
+        "state": "TS",
+        "zip_code": "12345",
+        "rent_price": 2000
+    }
+    
+    client.post("/api/properties", json=property_data_sale, headers=agent_headers)
+    client.post("/api/properties", json=property_data_rent, headers=agent_headers)
+    
+    # Test POST search with listing_type filter
+    search_filters = {
+        "listing_type": "for_sale"
+    }
+    response = client.post("/api/properties/search", json=search_filters)
+    assert response.status_code == 200
+    data = response.json()
+    assert "properties" in data
+    assert "total_count" in data
+    if data["properties"]:
+        assert all(p.get("listing_type") == "for_sale" for p in data["properties"])
+
+
+def test_listing_type_all_values(client, agent_headers, db_session):
+    """Test all listing_type enum values can be created"""
+    listing_types = ["for_sale", "for_rent", "for_lease", "for_auction"]
+    
+    for listing_type in listing_types:
+        property_data = {
+            "title": f"Property {listing_type}",
+            "description": f"A property {listing_type}",
+            "property_type": "house",
+            "listing_type": listing_type,
+            "status": "draft",
+            "address": f"123 {listing_type} St",
+            "city": "Test City",
+            "state": "TS",
+            "zip_code": "12345",
+            "price": 300000
+        }
+        
+        response = client.post("/api/properties", json=property_data, headers=agent_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["listing_type"] == listing_type

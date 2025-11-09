@@ -2,8 +2,7 @@
 User routes
 """
 
-import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -12,9 +11,10 @@ from app.schemas.user import UserOut, UserUpdate, UserRolesUpdate
 from app.services.user_service import UserService
 from app.dependencies.user_dependencies import get_current_user
 from app.models.user import User
+from app.core.logger import get_logger
 
-# Configure logger
-logger = logging.getLogger(__name__)
+# Configure structured logger
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -102,6 +102,7 @@ async def deactivate_current_user(
 async def update_user_roles(
     user_id: int,
     roles_data: UserRolesUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -122,8 +123,17 @@ async def update_user_roles(
     
     **Admin-only**: Only users with admin role can modify user roles.
     """
+    request_id = getattr(request.state, "request_id", "unknown")
+    
     # Admin-only restriction
     if not current_user.has_role("admin"):
+        logger.warning(
+            "unauthorized_role_update_attempt",
+            request_id=request_id,
+            admin_user_id=current_user.id,
+            admin_email=current_user.email,
+            target_user_id=user_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can modify user roles"
@@ -134,19 +144,38 @@ async def update_user_roles(
     # Get target user for logging
     target_user = user_service.get_user_by_id(user_id)
     if not target_user:
+        logger.warning(
+            "user_not_found_for_role_update",
+            request_id=request_id,
+            admin_user_id=current_user.id,
+            target_user_id=user_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with ID {user_id} not found"
         )
     
     # Log admin action for audit trail
-    logger.info("Admin %s (ID: %s) updating roles for user %s (ID: %s)", 
-                current_user.email, current_user.id, target_user.email, user_id)
-    logger.info("New roles requested: %s", roles_data.roles)
+    logger.info(
+        "role_update_initiated",
+        request_id=request_id,
+        admin_user_id=current_user.id,
+        admin_email=current_user.email,
+        target_user_id=user_id,
+        target_user_email=target_user.email,
+        requested_roles=roles_data.roles,
+    )
     
     updated_roles = user_service.update_roles(user_id, roles_data.roles)
     
     # Log successful role update
-    logger.info("Successfully updated roles for user %s to: %s", target_user.email, updated_roles)
+    logger.info(
+        "role_update_completed",
+        request_id=request_id,
+        admin_user_id=current_user.id,
+        target_user_id=user_id,
+        target_user_email=target_user.email,
+        updated_roles=updated_roles,
+    )
     
     return updated_roles

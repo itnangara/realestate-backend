@@ -2,12 +2,16 @@
 Authentication service for JWT and password handling
 """
 
-from datetime import datetime, timedelta
-from typing import Optional
+import secrets
+import hashlib
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from decouple import config
 from sqlalchemy.orm import Session
+
+from app.models.refresh_token import RefreshToken, REFRESH_TOKEN_EXPIRE_DAYS
 
 # Configuration
 SECRET_KEY = config("SECRET_KEY", default="your-secret-key-change-in-production")
@@ -34,10 +38,11 @@ class AuthService:
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """Create JWT access token"""
         to_encode = data.copy()
+        now = datetime.now(timezone.utc)
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = now + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -59,3 +64,116 @@ class AuthService:
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+    
+    def create_refresh_token(self) -> Tuple[str, str]:
+        """Generate a secure refresh token and return (token, hashed_token)"""
+        token = secrets.token_urlsafe(64)
+        hashed = hashlib.sha256(token.encode()).hexdigest()
+        return token, hashed
+    
+    def hash_refresh_token(self, token: str) -> str:
+        """Hash a refresh token for storage"""
+        return hashlib.sha256(token.encode()).hexdigest()
+    
+    def validate_refresh_token(self, token: str) -> Optional[RefreshToken]:
+        """Validate refresh token and return RefreshToken if valid"""
+        hashed_token = self.hash_refresh_token(token)
+        
+        refresh_token = self.db.query(RefreshToken).filter(
+            RefreshToken.token == hashed_token
+        ).first()
+        
+        if not refresh_token:
+            return None
+        
+        if refresh_token.revoked or refresh_token.is_expired:
+            return None
+        
+        return refresh_token
+    
+    def revoke_refresh_token(self, token: str, replaced_by: Optional[str] = None) -> bool:
+        """Revoke a refresh token"""
+        hashed_token = self.hash_refresh_token(token)
+        refresh_token = self.db.query(RefreshToken).filter(
+            RefreshToken.token == hashed_token
+        ).first()
+        
+        if not refresh_token:
+            return False
+        
+        refresh_token.revoked = True
+        if replaced_by:
+            refresh_token.replaced_by = replaced_by
+        refresh_token.last_used_at = datetime.now(timezone.utc)
+        
+        self.db.commit()
+        return True
+    
+    def revoke_all_user_tokens(self, user_id: int) -> int:
+        """Revoke all active refresh tokens for a user"""
+        revoked_count = self.db.query(RefreshToken).filter(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked == False
+        ).update({"revoked": True})
+        
+        self.db.commit()
+        return revoked_count
+    
+    def create_refresh_token_pair(
+        self, 
+        user_id: int, 
+        device_info: Optional[str] = None
+    ) -> Tuple[str, RefreshToken]:
+        """Create and save refresh token, return (plain_token, db_token)"""
+        plain_token, hashed_token = self.create_refresh_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        
+        refresh_token = RefreshToken(
+            user_id=user_id,
+            token=hashed_token,
+            expires_at=expires_at,
+            device_info=device_info
+        )
+        
+        self.db.add(refresh_token)
+        self.db.commit()
+        self.db.refresh(refresh_token)
+        
+        return plain_token, refresh_token
+    
+    def rotate_refresh_token(
+        self, 
+        old_token: str, 
+        user_id: int, 
+        device_info: Optional[str] = None
+    ) -> Tuple[str, RefreshToken]:
+        """Rotate refresh token: revoke old, create new"""
+        # Revoke old token
+        old_hashed = self.hash_refresh_token(old_token)
+        old_refresh_token = self.db.query(RefreshToken).filter(
+            RefreshToken.token == old_hashed,
+            RefreshToken.user_id == user_id
+        ).first()
+        
+        # Create new token
+        plain_token, hashed_token = self.create_refresh_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        
+        new_refresh_token = RefreshToken(
+            user_id=user_id,
+            token=hashed_token,
+            expires_at=expires_at,
+            device_info=device_info
+        )
+        
+        # Mark old token as replaced
+        if old_refresh_token:
+            old_refresh_token.revoked = True
+            old_refresh_token.replaced_by = hashed_token
+            old_refresh_token.last_used_at = datetime.now(timezone.utc)
+        
+        self.db.add(new_refresh_token)
+        self.db.commit()
+        self.db.refresh(new_refresh_token)
+        
+        return plain_token, new_refresh_token

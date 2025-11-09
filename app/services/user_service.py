@@ -2,7 +2,6 @@
 User service for business logic
 """
 
-import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, List
@@ -11,9 +10,10 @@ from app.models.role import Role
 from app.models.user_role import UserRole
 from app.schemas.user import UserCreate, UserUpdate
 from app.services.auth_service import AuthService
+from app.core.logger import get_logger
 
-# Configure logger
-logger = logging.getLogger(__name__)
+# Configure structured logger
+logger = get_logger(__name__)
 
 class UserService:
     """User service class"""
@@ -66,7 +66,12 @@ class UserService:
         # Warn if roles are provided in user update (should use dedicated endpoint)
         if roles_to_update is not None:
             # Log warning but don't process roles here
-            logger.warning("Role changes attempted via user update for user %s. Use dedicated role endpoint.", user_id)
+            logger.warning(
+                "role_update_via_user_endpoint",
+                user_id=user_id,
+                attempted_roles=roles_to_update,
+                message="Role changes attempted via user update. Use dedicated role endpoint.",
+            )
         
         # Update other fields only
         for field, value in update_data.items():
@@ -113,12 +118,22 @@ class UserService:
             
             # Commit transaction
             self.db.commit()
-            logger.info("Successfully updated roles for user %s to: %s", user_id, [role.name for role in roles])
+            logger.info(
+                "roles_updated_successfully",
+                user_id=user_id,
+                updated_roles=[role.name for role in roles],
+            )
             
         except SQLAlchemyError as e:
             # Rollback on error
             self.db.rollback()
-            logger.error("Failed to update roles for user %s: %s", user_id, str(e))
+            logger.error(
+                "role_update_failed",
+                user_id=user_id,
+                error_type=type(e).__name__,
+                error_message=str(e),
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=500,
                 detail="Failed to update roles due to database error"

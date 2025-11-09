@@ -3,9 +3,13 @@ Real Estate Application - FastAPI Backend
 Main application entry point
 """
 
-from fastapi import FastAPI
+import uuid
+import time
+from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from decouple import config
 import os
@@ -13,9 +17,13 @@ from app.routes import auth, properties, users, applications, favorites, seller,
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
 from app.core.limiter import limiter
+from app.core.logger import get_logger
 from app.monitoring import setup_metrics
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
+
+# Initialize structured logger
+logger = get_logger(__name__)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -55,13 +63,246 @@ app.add_middleware(
 # Rate limiter
 app.state.limiter = limiter
 
+# Request logging middleware
+@app.middleware("http")
+async def add_request_logging(request: Request, call_next):
+    """
+    Enterprise-grade request/response logging middleware.
+    
+    Features:
+    - Unique request ID for correlation
+    - Request/response logging with proper log levels
+    - Performance timing
+    - User context extraction
+    - Sensitive data masking
+    """
+    # Generate unique request ID
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    # Extract request context
+    client_host = request.client.host if request.client else "unknown"
+    method = request.method
+    path = request.url.path
+    query_params = str(request.query_params) if request.query_params else None
+    
+    # Extract user context if available (set by auth dependencies)
+    user_id = getattr(request.state, "user_id", None)
+    user_email = getattr(request.state, "user_email", None)
+    
+    # Check if request has authentication header (for logging context)
+    auth_header = request.headers.get("Authorization", "")
+    has_auth = bool(auth_header and auth_header.startswith("Bearer "))
+    
+    # Log request received
+    logger.info(
+        event="request_received",
+        request_id=request_id,
+        client_ip=client_host,
+        method=method,
+        path=path,
+        query_params=query_params,
+        user_id=user_id,
+        user_email=user_email,
+        has_auth=has_auth,
+    )
+    
+    # Track request start time
+    start_time = time.time()
+    
+    try:
+        # Process request
+        response = await call_next(request)
+        
+        # Calculate duration
+        duration_ms = (time.time() - start_time) * 1000
+        
+        # Log request completed with appropriate level based on status code
+        status_code = response.status_code
+        log_data = {
+            "request_id": request_id,
+            "client_ip": client_host,
+            "method": method,
+            "path": path,
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 2),
+            "user_id": user_id,
+            "user_email": user_email,
+            "event": "request_completed",
+        }
+        
+        # Use appropriate log level based on status code
+        if 400 <= status_code < 500:
+            logger.warning(**log_data)
+        elif status_code >= 500:
+            logger.error(**log_data)
+        else:
+            logger.info(**log_data)
+        
+        # Add request ID to response headers for client correlation
+        response.headers["X-Request-ID"] = request_id
+        
+        return response
+        
+    except Exception as e:
+        # Log unhandled exceptions
+        duration_ms = (time.time() - start_time) * 1000
+        logger.error(
+            event="request_failed",
+            request_id=request_id,
+            client_ip=client_host,
+            method=method,
+            path=path,
+            duration_ms=round(duration_ms, 2),
+            user_id=user_id,
+            user_email=user_email,
+            error_type=type(e).__name__,
+            error_message=str(e),
+            exc_info=True,
+        )
+        raise
+
+
+def add_cors_headers(response: JSONResponse, request: Request) -> JSONResponse:
+    """
+    Add CORS headers to a response.
+    
+    Exception handlers bypass middleware, so we need to manually add CORS headers.
+    This ensures CORS works consistently across all responses, including error responses.
+    """
+    origin = request.headers.get("origin")
+    if origin:
+        # Check if origin is in allowed origins (match CORS middleware logic)
+        allowed_origins = [o.strip() for o in cors_origins]
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
+# Validation error exception handler (422)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Enterprise-grade validation error handler.
+    
+    Returns structured validation errors that are easy for frontend to parse and display.
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    client_host = request.client.host if request.client else "unknown"
+    
+    # Extract validation errors in a structured format
+    errors = exc.errors()
+    field_errors = []
+    error_messages = []
+    
+    for error in errors:
+        # Get field name (last item in location path)
+        field_path = error.get("loc", [])
+        field_name = field_path[-1] if field_path else "unknown"
+        
+        # Get error message
+        error_msg = error.get("msg", "Validation error")
+        error_type = error.get("type", "validation_error")
+        
+        field_errors.append({
+            "field": field_name,
+            "message": error_msg,
+            "type": error_type,
+            "path": list(field_path)  # Full path for nested fields
+        })
+        error_messages.append(f"{field_name}: {error_msg}")
+    
+    # Log validation errors with structured logging
+    logger.warning(
+        event="validation_error",
+        request_id=request_id,
+        client_ip=client_host,
+        method=request.method,
+        path=request.url.path,
+        field_count=len(field_errors),
+        fields=[e["field"] for e in field_errors],
+        error_types=[e["type"] for e in field_errors],
+    )
+    
+    # Return structured error response with CORS headers
+    response = JSONResponse(
+        status_code=422,
+        content={
+            "error": "ValidationError",
+            "message": "Request validation failed",
+            "fields": [e["field"] for e in field_errors],  # Simple list for quick access
+            "errors": field_errors,  # Detailed errors with full context
+            "summary": "; ".join(error_messages),  # Human-readable summary
+        },
+        headers={"X-Request-ID": request_id}
+    )
+    return add_cors_headers(response, request)
+
+
 # Rate limit exception handler
 @app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request, exc):
-    return JSONResponse(
-        status_code=429,
-        content={"detail": f"Rate limit exceeded: {exc.detail}"}
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Handle rate limit exceptions with structured logging"""
+    request_id = getattr(request.state, "request_id", "unknown")
+    client_host = request.client.host if request.client else "unknown"
+    
+    logger.warning(
+        event="rate_limit_exceeded",
+        request_id=request_id,
+        client_ip=client_host,
+        path=request.url.path,
+        detail=exc.detail,
     )
+    
+    response = JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        headers={"X-Request-ID": request_id}
+    )
+    return add_cors_headers(response, request)
+
+
+# Global HTTP exception handler (for 4xx and 5xx errors)
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions with CORS headers"""
+    request_id = getattr(request.state, "request_id", "unknown")
+    
+    response = JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={"X-Request-ID": request_id}
+    )
+    return add_cors_headers(response, request)
+
+
+# Global exception handler for unhandled exceptions (500 errors)
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with CORS headers"""
+    request_id = getattr(request.state, "request_id", "unknown")
+    client_host = request.client.host if request.client else "unknown"
+    
+    logger.error(
+        event="unhandled_exception",
+        request_id=request_id,
+        client_ip=client_host,
+        method=request.method,
+        path=request.url.path,
+        error_type=type(exc).__name__,
+        error_message=str(exc),
+        exc_info=True,
+    )
+    
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+        headers={"X-Request-ID": request_id}
+    )
+    return add_cors_headers(response, request)
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -77,8 +318,10 @@ setup_metrics(app)
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize cache on application startup"""
+    """Initialize cache and log startup"""
+    logger.info("application_starting", version="1.0.0")
     await init_cache()
+    logger.info("application_started", version="1.0.0")
 
 @app.get("/")
 async def root():

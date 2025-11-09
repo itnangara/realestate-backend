@@ -76,6 +76,9 @@ class User(Base):
     landlord_profile = relationship("LandlordProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     agent_profile = relationship("AgentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     investor_profile = relationship("InvestorProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    
+    # Refresh tokens relationship
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         roles_str = str(self.roles) if hasattr(self, 'user_roles') else "[]"

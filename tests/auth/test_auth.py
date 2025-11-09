@@ -58,7 +58,7 @@ def test_register_duplicate_username(client, test_user_buyer):
 
 
 def test_login_success(client, test_user_buyer):
-    """Test successful login"""
+    """Test successful login with refresh token"""
     response = client.post("/api/auth/login", data={
         "username": "buyer@test.com",
         "password": "testpassword"
@@ -67,8 +67,10 @@ def test_login_success(client, test_user_buyer):
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
+    assert "refresh_token" in data
     assert data["token_type"] == "bearer"
     assert len(data["access_token"]) > 0
+    assert len(data["refresh_token"]) > 0
 
 
 def test_login_invalid_credentials(client):
@@ -139,3 +141,166 @@ def test_get_current_user_no_token(client):
     response = client.get("/api/auth/me")
     
     assert response.status_code == 401
+
+
+def test_refresh_token_success(client, test_user_buyer):
+    """Test successful token refresh with rotation"""
+    # First login to get tokens
+    login_response = client.post("/api/auth/login", data={
+        "username": "buyer@test.com",
+        "password": "testpassword"
+    })
+    assert login_response.status_code == 200
+    login_data = login_response.json()
+    refresh_token = login_data["refresh_token"]
+    
+    # Use refresh token to get new tokens
+    refresh_response = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token}
+    )
+    
+    assert refresh_response.status_code == 200
+    refresh_data = refresh_response.json()
+    assert "access_token" in refresh_data
+    assert "refresh_token" in refresh_data
+    assert refresh_data["token_type"] == "bearer"
+    # New refresh token should be different (rotation)
+    assert refresh_data["refresh_token"] != refresh_token
+
+
+def test_refresh_token_invalid(client):
+    """Test refresh with invalid token"""
+    response = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": "invalid_refresh_token"}
+    )
+    
+    assert response.status_code == 401
+    assert "Invalid or expired refresh token" in response.json()["detail"]
+
+
+def test_refresh_token_missing(client):
+    """Test refresh without token"""
+    response = client.post("/api/auth/refresh")
+    
+    assert response.status_code == 422  # Validation error
+
+
+def test_logout_success(client, test_user_buyer, buyer_token):
+    """Test successful logout"""
+    # First login to get refresh token
+    login_response = client.post("/api/auth/login", data={
+        "username": "buyer@test.com",
+        "password": "testpassword"
+    })
+    assert login_response.status_code == 200
+    refresh_token = login_response.json()["refresh_token"]
+    
+    # Logout
+    logout_response = client.post(
+        "/api/auth/logout",
+        headers={
+            "Authorization": f"Bearer {buyer_token}",
+            "X-Refresh-Token": refresh_token
+        }
+    )
+    
+    assert logout_response.status_code == 200
+    assert "Successfully logged out" in logout_response.json()["message"]
+    
+    # Try to use revoked refresh token
+    refresh_response = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token}
+    )
+    assert refresh_response.status_code == 401
+
+
+def test_logout_invalid_refresh_token(client, buyer_token):
+    """Test logout with invalid refresh token"""
+    response = client.post(
+        "/api/auth/logout",
+        headers={
+            "Authorization": f"Bearer {buyer_token}",
+            "X-Refresh-Token": "invalid_token"
+        }
+    )
+    
+    assert response.status_code == 404
+    assert "Refresh token not found" in response.json()["detail"]
+
+
+def test_logout_all_success(client, test_user_buyer, buyer_token):
+    """Test logout from all devices"""
+    # Create multiple refresh tokens by logging in multiple times
+    login1 = client.post("/api/auth/login", data={
+        "username": "buyer@test.com",
+        "password": "testpassword"
+    })
+    login2 = client.post("/api/auth/login", data={
+        "username": "buyer@test.com",
+        "password": "testpassword"
+    })
+    
+    refresh_token1 = login1.json()["refresh_token"]
+    refresh_token2 = login2.json()["refresh_token"]
+    
+    # Logout all
+    logout_response = client.post(
+        "/api/auth/logout-all",
+        headers={"Authorization": f"Bearer {buyer_token}"}
+    )
+    
+    assert logout_response.status_code == 200
+    message = logout_response.json()["message"]
+    assert "Successfully logged out" in message
+    assert "device" in message.lower()
+    
+    # Verify both tokens are revoked
+    refresh_response1 = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token1}
+    )
+    refresh_response2 = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token2}
+    )
+    
+    assert refresh_response1.status_code == 401
+    assert refresh_response2.status_code == 401
+
+
+def test_refresh_token_rotation(client, test_user_buyer):
+    """Test that refresh token is rotated on each refresh"""
+    # Login
+    login_response = client.post("/api/auth/login", data={
+        "username": "buyer@test.com",
+        "password": "testpassword"
+    })
+    refresh_token1 = login_response.json()["refresh_token"]
+    
+    # First refresh
+    refresh_response1 = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token1}
+    )
+    assert refresh_response1.status_code == 200
+    refresh_token2 = refresh_response1.json()["refresh_token"]
+    assert refresh_token2 != refresh_token1
+    
+    # Second refresh with new token
+    refresh_response2 = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token2}
+    )
+    assert refresh_response2.status_code == 200
+    refresh_token3 = refresh_response2.json()["refresh_token"]
+    assert refresh_token3 != refresh_token2
+    
+    # Old token should be revoked
+    old_token_response = client.post(
+        "/api/auth/refresh",
+        headers={"X-Refresh-Token": refresh_token1}
+    )
+    assert old_token_response.status_code == 401

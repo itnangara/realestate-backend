@@ -138,11 +138,18 @@ class UserLogin(BaseModel):
 
 
 class Token(BaseModel):
-    """Schema for JWT token response"""
+    """Schema for JWT token response with refresh token"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
 
 
 class TokenData(BaseModel):
     """Schema for token data"""
     email: Optional[str] = None
+
+
+class UserConflictResponse(BaseModel):
+    """Schema for 409 Conflict response when user already exists"""
+    detail: str
+    user: UserOut
