@@ -111,6 +111,9 @@ async def get_my_role_requests(
     """
     Get all role requests for the authenticated user.
     
+    Enterprise-grade: Always returns an array, even if empty.
+    Ensures type safety and prevents frontend crashes from null/undefined.
+    
     Optional query parameter:
     - status: Filter by status (pending, in_review, approved, rejected)
     """
@@ -120,7 +123,11 @@ async def get_my_role_requests(
         status_filter=status
     )
     
+    # Defensive: Ensure requests is always a list (never None)
+    # This prevents type errors in frontend and ensures consistent API responses
+    requests_list = requests if requests is not None else []
+    
     return RoleRequestListResponse(
-        requests=[RoleRequestResponse.model_validate(req) for req in requests],
-        total=len(requests)
+        requests=[RoleRequestResponse.model_validate(req) for req in requests_list],
+        total=len(requests_list)
     )

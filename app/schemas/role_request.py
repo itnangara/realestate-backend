@@ -2,16 +2,17 @@
 Role Request schemas for API requests and responses
 """
 
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import List, Optional, Any
 from datetime import datetime
+from uuid import UUID
 from app.models.role_request import RoleRequestStatus
 
 
 class RoleRequestCreate(BaseModel):
     """Request schema for creating a role request"""
     requested_roles: List[str] = Field(..., min_items=1, description="List of roles to request")
-    document_ids: Optional[List[int]] = Field(default=None, description="List of document IDs to attach")
+    document_ids: Optional[List[UUID]] = Field(default=None, description="List of document file UUIDs to attach")
     notes: Optional[str] = Field(default=None, max_length=1000, description="Optional notes for the request")
     
     @field_validator('requested_roles')
@@ -39,15 +40,33 @@ class RoleRequestResponse(BaseModel):
     reviewed_by: Optional[int] = None
     reviewed_at: Optional[datetime] = None
     notes: Optional[str] = None
-    attachments: Optional[List[int]] = None
+    attachments: Optional[List[UUID]] = Field(None, description="List of document file UUIDs")
     trust_score: float
+    
+    @model_validator(mode='before')
+    @classmethod
+    def convert_attachments_to_uuids(cls, data: Any) -> Any:
+        """Convert attachment strings to UUIDs"""
+        if isinstance(data, dict) and 'attachments' in data:
+            attachments = data.get('attachments')
+            if attachments:
+                try:
+                    data['attachments'] = [UUID(str(att)) for att in attachments]
+                except (ValueError, TypeError):
+                    data['attachments'] = None
+        return data
     
     class Config:
         from_attributes = True
 
 
 class RoleRequestListResponse(BaseModel):
-    """Response schema for listing role requests"""
-    requests: List[RoleRequestResponse]
-    total: int
+    """
+    Response schema for listing role requests.
+    
+    Enterprise-grade: requests field is always a list, never None.
+    Empty list [] is returned when no requests exist, ensuring type safety.
+    """
+    requests: List[RoleRequestResponse] = Field(default_factory=list, description="List of role requests (empty array if none)")
+    total: int = Field(default=0, description="Total count of role requests")
 

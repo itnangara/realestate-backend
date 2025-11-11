@@ -33,17 +33,18 @@ class RoleRequestService:
         self,
         user_id: int,
         requested_roles: List[str],
-        document_ids: Optional[List[int]] = None,
+        document_ids: Optional[List] = None,
         notes: Optional[str] = None,
         request_id: Optional[str] = None
     ) -> RoleRequest:
         """
-        Create a new role request
-        
+        Create a new role request or merge into existing pending request.
+    
+
         Args:
             user_id: ID of the user making the request
             requested_roles: List of role names to request
-            document_ids: Optional list of document IDs to attach
+            document_ids: Optional list of document file UUIDs to attach
             notes: Optional notes for the request
             request_id: Optional request ID for correlation
             
@@ -61,12 +62,17 @@ class RoleRequestService:
                 detail="Role requests are currently disabled"
             )
         
-        # Validate documents if provided
+        # Validate documents if provided (document_ids are UUIDs)
         attachments = None
         if document_ids:
-            documents = self.document_service.get_documents_by_ids(document_ids, user_id)
+            # Convert UUID strings to list for query
+            file_id_strings = [str(doc_id) for doc_id in document_ids]
+            documents = self.document_service.get_documents_by_file_ids(file_id_strings, user_id)
+            
             if len(documents) != len(document_ids):
-                missing_ids = set(document_ids) - {doc.id for doc in documents}
+                found_file_ids = {str(doc.file_id) for doc in documents}
+                requested_file_ids = {str(doc_id) for doc_id in document_ids}
+                missing_ids = requested_file_ids - found_file_ids
                 logger.warning(
                     "role_request_documents_not_found",
                     user_id=user_id,
@@ -77,8 +83,8 @@ class RoleRequestService:
                     detail=f"Documents not found or do not belong to you: {list(missing_ids)}"
                 )
             
-            # Store document IDs as JSON array
-            attachments = [doc.id for doc in documents]
+            # Store document file UUIDs as JSON array (for external API exposure)
+            attachments = [str(doc.file_id) for doc in documents]
         
         # Create role request
         role_request = RoleRequest(
@@ -93,18 +99,21 @@ class RoleRequestService:
         self.db.commit()
         self.db.refresh(role_request)
         
-        # Audit log
+        # Audit log - convert UUID objects to strings for JSON serialization
+        meta = {
+            "requested_roles": requested_roles,
+            "notes": notes
+        }
+        if document_ids:
+            meta["document_ids"] = [str(doc_id) for doc_id in document_ids]
+        
         audit_service.log_user_action(
             db=self.db,
             action="role_request_created",
             user_id=user_id,
             target_type="role_request",
             target_id=role_request.id,
-            meta={
-                "requested_roles": requested_roles,
-                "document_ids": document_ids,
-                "notes": notes
-            },
+            meta=meta,
             request_id=request_id
         )
         
@@ -143,21 +152,26 @@ class RoleRequestService:
         status_filter: Optional[RoleRequestStatus] = None
     ) -> List[RoleRequest]:
         """
-        Get all role requests for a user
+        Get all role requests for a user.
+        
+        Enterprise-grade: Always returns a list, never None.
+        Returns empty list [] if no requests found.
         
         Args:
             user_id: ID of the user
             status_filter: Optional filter by status
             
         Returns:
-            List of RoleRequest objects
+            List of RoleRequest objects (empty list if none found)
         """
         query = self.db.query(RoleRequest).filter(RoleRequest.user_id == user_id)
         
         if status_filter:
             query = query.filter(RoleRequest.status == status_filter)
         
-        return query.order_by(RoleRequest.requested_at.desc()).all()
+        results = query.order_by(RoleRequest.requested_at.desc()).all()
+        # Defensive: Ensure we always return a list, never None
+        return results if results is not None else []
     
     def get_role_request(
         self,

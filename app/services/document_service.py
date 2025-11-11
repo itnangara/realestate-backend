@@ -69,24 +69,51 @@ class DocumentService:
                 detail=f"File size exceeds maximum allowed size of {max_size} bytes"
             )
         
-        # Generate S3 key
-        file_extension = file_name.split('.')[-1] if '.' in file_name else ''
-        s3_key = s3_service.generate_s3_key(
-            user_id=user_id,
-            document_type=document_type.value,
-            file_extension=f".{file_extension}" if file_extension else ""
-        )
+        # Check for duplicate upload (same file_name, type, and size within last 30 seconds)
+        # Prevents frontend from creating multiple records for the same file
+        from datetime import timedelta
+        from sqlalchemy import func
+        recent_duplicate = self.db.query(Document).filter(
+            Document.user_id == user_id,
+            Document.file_name == file_name,
+            Document.type == document_type,
+            Document.size == file_size,
+            Document.uploaded_at >= func.now() - timedelta(seconds=30)
+        ).first()
         
-        # Create document record
-        document = Document(
-            user_id=user_id,
-            type=document_type,
-            s3_key=s3_key,
-            status=DocumentStatus.PENDING
-        )
-        self.db.add(document)
-        self.db.commit()
-        self.db.refresh(document)
+        if recent_duplicate:
+            logger.warning(
+                "duplicate_document_upload_prevented",
+                user_id=user_id,
+                file_name=file_name,
+                document_type=document_type.value,
+                existing_document_id=recent_duplicate.id,
+                existing_file_id=str(recent_duplicate.file_id)
+            )
+            document = recent_duplicate
+            s3_key = recent_duplicate.s3_key
+        else:
+            # Generate S3 key
+            file_extension = file_name.split('.')[-1] if '.' in file_name else ''
+            s3_key = s3_service.generate_s3_key(
+                user_id=user_id,
+                document_type=document_type.value,
+                file_extension=f".{file_extension}" if file_extension else ""
+            )
+            
+            # Create document record
+            document = Document(
+                user_id=user_id,
+                type=document_type,
+                s3_key=s3_key,
+                file_name=file_name,
+                size=file_size,
+                mime_type=content_type,
+                status=DocumentStatus.PENDING
+            )
+            self.db.add(document)
+            self.db.commit()
+            self.db.refresh(document)
         
         # Generate presigned PUT URL (PII documents go to separate bucket)
         is_pii = document_type in [DocumentType.ID_FRONT, DocumentType.ID_BACK, DocumentType.PROOF_OF_ADDRESS]
@@ -158,9 +185,15 @@ class DocumentService:
         )
         
         return {
+            "file_id": str(document.file_id),
             "document_id": document.id,
+            "file_name": document.file_name,
+            "size": document.size,
+            "mime_type": document.mime_type,
             "upload_url": upload_url,
             "s3_key": s3_key,
+            "status": document.status.value,
+            "uploaded_at": document.uploaded_at,
             "expires_in": 900
         }
     
@@ -362,4 +395,157 @@ class DocumentService:
             Document.id.in_(document_ids),
             Document.user_id == user_id
         ).all()
+    
+    def get_documents_by_file_ids(
+        self,
+        file_ids: List[str],
+        user_id: int
+    ) -> List[Document]:
+        """
+        Get multiple documents by file UUIDs (with authorization check)
+        
+        Args:
+            file_ids: List of file UUID strings
+            user_id: ID of the user (for authorization)
+            
+        Returns:
+            List of Document objects that belong to the user
+        """
+        from uuid import UUID
+        try:
+            uuids = [UUID(fid) for fid in file_ids]
+        except ValueError as e:
+            logger.warning(
+                "invalid_file_uuid_format",
+                file_ids=file_ids,
+                error=str(e)
+            )
+            return []
+        
+        return self.db.query(Document).filter(
+            Document.file_id.in_(uuids),
+            Document.user_id == user_id
+        ).all()
+    
+    
+    async def delete_document(
+        self,
+        file_id: str,
+        user_id: int,
+        request_id: Optional[str] = None
+    ) -> bool:
+        """
+        Delete a document (with authorization check)
+        
+        Args:
+            file_id: File UUID string
+            user_id: ID of the user (for authorization)
+            request_id: Optional request ID for correlation
+            
+        Returns:
+            True if deleted, False if not found
+            
+        Raises:
+            HTTPException: If document not found or unauthorized
+        """
+        from uuid import UUID
+        try:
+            file_uuid = UUID(file_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file ID format"
+            )
+        
+        document = self.db.query(Document).filter(
+            Document.file_id == file_uuid,
+            Document.user_id == user_id
+        ).first()
+        
+        if not document:
+            return False
+        
+        # Check if document is attached to any role requests
+        from app.models.role_request import RoleRequest
+        attached_requests = self.db.query(RoleRequest).filter(
+            RoleRequest.attachments.isnot(None)
+        ).all()
+        
+        for request in attached_requests:
+            if request.attachments and str(document.file_id) in [str(att) for att in request.attachments]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot delete document that is attached to a role request"
+                )
+        
+        # Delete from S3 (optional - can be done async)
+        # For now, we'll just mark as deleted in DB
+        # S3 cleanup can be done via background job
+        
+        self.db.delete(document)
+        self.db.commit()
+        
+        # Audit log
+        audit_service.log_user_action(
+            db=self.db,
+            action="document_deleted",
+            user_id=user_id,
+            target_type="document",
+            target_id=document.id,
+            meta={
+                "file_id": file_id,
+                "file_name": document.file_name,
+                "document_type": document.type.value
+            },
+            request_id=request_id
+        )
+        
+        logger.info(
+            "document_deleted",
+            document_id=document.id,
+            file_id=file_id,
+            user_id=user_id
+        )
+        
+        return True
+    
+    async def get_document_with_url(
+        self,
+        document: Document
+    ) -> dict:
+        """
+        Get document with presigned URL for access.
+        
+        Returns full metadata including UUID (file_id) and signed URL for frontend state rehydration.
+        
+        Args:
+            document: Document object
+            
+        Returns:
+            Dictionary with document data and signed URL including:
+            - file_id (UUID): For frontend state management and external API exposure
+            - id: Internal document ID for DB references
+            - signed_url: Presigned URL for accessing the document
+            - All metadata: file_name, size, mime_type, status, uploaded_at
+        """
+        is_pii = document.type in [DocumentType.ID_FRONT, DocumentType.ID_BACK, DocumentType.PROOF_OF_ADDRESS]
+        signed_url = s3_service.generate_presigned_get_url(
+            s3_key=document.s3_key,
+            expires_in=3600,
+            is_pii=is_pii
+        )
+        
+        return {
+            "file_id": str(document.file_id),
+            "id": document.id,
+            "user_id": document.user_id,
+            "file_name": document.file_name,
+            "size": document.size,
+            "mime_type": document.mime_type,
+            "type": document.type.value,
+            "s3_key": document.s3_key,
+            "status": document.status.value,
+            "uploaded_at": document.uploaded_at,
+            "signed_url": signed_url
+        }
 

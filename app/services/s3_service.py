@@ -76,7 +76,11 @@ class S3Service:
         is_pii: bool = False
     ) -> Optional[str]:
         """
-        Generate presigned PUT URL for document upload
+        Generate presigned PUT URL for document upload.
+        
+        Note: For large files (>10MB), consider implementing multipart uploads
+        with resumable/chunked uploads for better reliability. Current implementation
+        uses simple PUT URLs which work well for files up to 10MB.
         
         Args:
             s3_key: S3 object key (path) where file will be stored

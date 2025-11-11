@@ -2,10 +2,11 @@
 Document model for secure document storage with S3 integration
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID
 from app.utils.database import Base
 import enum
 
@@ -36,7 +37,13 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(UUID(as_uuid=True), server_default=text("gen_random_uuid()"), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # Document metadata
+    file_name = Column(String(255), nullable=False)
+    size = Column(Integer, nullable=False)
+    mime_type = Column(String(100), nullable=False)
     
     # Document type
     type = Column(
@@ -46,7 +53,7 @@ class Document(Base):
     )
     
     # S3 storage
-    s3_key = Column(String(255), nullable=False, unique=True)  # S3 object key (path)
+    s3_key = Column(String(255), nullable=False, unique=True)
     
     # Status tracking
     status = Column(
@@ -63,11 +70,14 @@ class Document(Base):
     user = relationship("User", backref="documents")
     
     # Indexes for common queries
+    # Composite indexes optimize queries filtering by user_id + status/type
+    # Single index on file_id for UUID lookups (external API exposure)
     __table_args__ = (
         Index("idx_documents_user_type", "user_id", "type"),
         Index("idx_documents_user_status", "user_id", "status"),
+        Index("idx_documents_file_id", "file_id"),
     )
 
     def __repr__(self):
-        return f"<Document(id={self.id}, user_id={self.user_id}, type='{self.type.value}', s3_key='{self.s3_key}')>"
+        return f"<Document(id={self.id}, file_id={self.file_id}, user_id={self.user_id}, type='{self.type.value}')>"
 

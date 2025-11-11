@@ -86,8 +86,12 @@ async def list_role_requests(
     # Apply pagination
     requests = query.order_by(RoleRequest.requested_at.desc()).offset(offset).limit(limit).all()
     
+    # Defensive: Ensure requests is always a list (never None)
+    # Enterprise-grade: Consistent type safety across all endpoints
+    requests_list = requests if requests is not None else []
+    
     return RoleRequestListResponse(
-        requests=[RoleRequestResponse.model_validate(req) for req in requests],
+        requests=[RoleRequestResponse.model_validate(req) for req in requests_list],
         total=total
     )
 

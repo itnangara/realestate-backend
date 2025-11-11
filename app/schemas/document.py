@@ -5,6 +5,7 @@ Document schemas for API requests and responses
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
+from uuid import UUID
 from app.models.document import DocumentType, DocumentStatus
 
 
@@ -32,21 +33,37 @@ class DocumentUploadRequest(BaseModel):
 
 
 class DocumentUploadResponse(BaseModel):
-    """Response schema for document upload initiation"""
-    document_id: int = Field(..., description="ID of the created document record")
+    """Response schema for document upload with full metadata"""
+    file_id: UUID = Field(..., description="Unique file identifier (UUID) for external API exposure")
+    document_id: int = Field(..., description="Internal document ID for DB references")
+    file_name: str = Field(..., description="Original file name")
+    size: int = Field(..., description="File size in bytes")
+    mime_type: str = Field(..., description="MIME type of the file")
     upload_url: str = Field(..., description="Presigned PUT URL for uploading the file")
     s3_key: str = Field(..., description="S3 key where the file will be stored")
+    status: DocumentStatus = Field(..., description="Document status")
+    uploaded_at: datetime = Field(..., description="Upload timestamp")
     expires_in: int = Field(default=900, description="URL expiration time in seconds (15 minutes)")
 
 
+class DocumentUploadRequestMulti(BaseModel):
+    """Request schema for uploading multiple documents"""
+    files: List[DocumentUploadRequest] = Field(..., min_items=1, max_items=10, description="List of files to upload")
+
+
 class DocumentResponse(BaseModel):
-    """Response schema for document retrieval"""
-    id: int
+    """Response schema for document retrieval with full metadata"""
+    id: int = Field(..., description="Internal document ID for DB references")
+    file_id: UUID = Field(..., description="Unique file identifier (UUID) for external API exposure")
     user_id: int
+    file_name: str
+    size: int
+    mime_type: str
     type: DocumentType
     s3_key: str
     status: DocumentStatus
     uploaded_at: datetime
+    signed_url: Optional[str] = Field(None, description="Presigned URL for accessing the document")
     
     class Config:
         from_attributes = True
