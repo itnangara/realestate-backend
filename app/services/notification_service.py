@@ -397,6 +397,77 @@ Real Estate Platform Team
             body_text=body_text.strip(),
             body_html=body_html.strip()
         )
+    
+    def send_verification_email(
+        self,
+        to_email: str,
+        user_name: str,
+        verification_link: str
+    ) -> bool:
+        """
+        Send email verification email with verification link.
+        
+        Args:
+            to_email: User email address
+            user_name: User's full name
+            verification_link: Full URL to verification page with token
+            
+        Returns:
+            True if email sent successfully, False otherwise
+        """
+        subject = "Verify Your Email Address"
+        
+        # Generate text body
+        body_text = f"""
+Dear {user_name},
+
+Thank you for registering with Real Estate Platform!
+
+Please verify your email address by clicking the link below:
+
+{verification_link}
+
+This link will expire in 24 hours.
+
+If you did not create an account, please ignore this email.
+
+Thank you,
+Real Estate Platform Team
+"""
+        
+        # Generate HTML body
+        body_html = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #2c3e50;">Verify Your Email Address</h2>
+        <p>Dear {user_name},</p>
+        <p>Thank you for registering with Real Estate Platform!</p>
+        <p>Please verify your email address by clicking the button below:</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{verification_link}" 
+               style="background-color: #3498db; color: white; padding: 12px 30px; 
+                      text-decoration: none; border-radius: 5px; display: inline-block;">
+                Verify Email Address
+            </a>
+        </div>
+        <p>Or copy and paste this link into your browser:</p>
+        <p style="word-break: break-all; color: #7f8c8d; font-size: 12px;">{verification_link}</p>
+        <p style="color: #e74c3c; font-size: 14px;"><strong>This link will expire in 24 hours.</strong></p>
+        <p>If you did not create an account, please ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #ecf0f1; margin: 20px 0;">
+        <p style="color: #95a5a6; font-size: 12px;">Thank you,<br>Real Estate Platform Team</p>
+    </div>
+</body>
+</html>
+"""
+        
+        return self.send_email(
+            to_email=to_email,
+            subject=subject,
+            body_text=body_text.strip(),
+            body_html=body_html.strip()
+        )
 
 
 # Singleton instance

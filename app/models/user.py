@@ -48,8 +48,9 @@ class User(Base):
     profile_image_url = Column(String(500), nullable=True)
     
     # User roles and permissions - relational approach + profile tables
+    # Use native_enum=True for PostgreSQL native enums, and ensure SQLAlchemy uses enum VALUES (not names)
     status = Column(
-        Enum(UserStatus, native_enum=True),
+        Enum(UserStatus, native_enum=True, values_callable=lambda obj: [e.value for e in obj]),
         default=UserStatus.PENDING,
         nullable=False,
         index=True
@@ -94,6 +95,9 @@ class User(Base):
     
     # Refresh tokens relationship
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    
+    # Email verification tokens relationship
+    email_verification_tokens = relationship("EmailVerificationToken", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         roles_str = str(self.roles) if hasattr(self, 'user_roles') else "[]"

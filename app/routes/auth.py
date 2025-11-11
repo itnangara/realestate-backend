@@ -2,7 +2,7 @@
 Authentication routes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Response, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Response, Request, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,8 @@ from app.utils.database import get_db
 from app.schemas.user import UserCreate, UserOut, Token, UserLogin, UserConflictResponse
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
+from app.services.email_verification_service import EmailVerificationService
+from app.services.notification_service import notification_service
 from app.dependencies.user_dependencies import get_current_user
 from app.models.user import User
 from app.core.logger import get_logger
@@ -57,7 +59,7 @@ async def register_user(
         # Return 409 Conflict with user object (idempotent behavior)
         # This allows clients to continue seamlessly without extra fetch
         logger.info(
-            "user_registration_duplicate",
+            event="user_registration_duplicate",
             request_id=request_id,
             email=user_data.email,
             username=user_data.username,
@@ -74,7 +76,7 @@ async def register_user(
     existing_username = user_service.get_user_by_username(user_data.username)
     if existing_username:
         logger.warning(
-            "user_registration_username_taken",
+            event="user_registration_username_taken",
             request_id=request_id,
             email=user_data.email,
             username=user_data.username,
@@ -88,15 +90,38 @@ async def register_user(
     # Create user with error handling for race conditions
     try:
         logger.info(
-            "user_registration_started",
+            event="user_registration_started",
             request_id=request_id,
             email=user_data.email,
             username=user_data.username,
         )
         user = user_service.create_user(user_data)
+        
+        # Send verification email after user creation
+        try:
+            verification_service = EmailVerificationService(db, notification_service)
+            verification_service.send_verification_email(user, request_id)
+            logger.info(
+                event="verification_email_sent_on_registration",
+                request_id=request_id,
+                user_id=user.id,
+                email=user.email,
+            )
+        except Exception as e:
+            # Log error but don't fail registration if email fails
+            logger.error(
+                event="verification_email_failed_on_registration",
+                request_id=request_id,
+                user_id=user.id,
+                email=user.email,
+                error=str(e),
+                exc_info=True,
+            )
+            # Continue with registration even if email fails
+        
         # Return 201 Created for new user
         logger.info(
-            "user_registration_completed",
+            event="user_registration_completed",
             request_id=request_id,
             user_id=user.id,
             email=user.email,
@@ -115,7 +140,7 @@ async def register_user(
             existing_user = user_service.get_user_by_email(user_data.email)
             if existing_user:
                 logger.info(
-                    "user_registration_race_condition_handled",
+                    event="user_registration_race_condition_handled",
                     request_id=request_id,
                     email=user_data.email,
                     existing_user_id=existing_user.id,
@@ -131,7 +156,7 @@ async def register_user(
         # Check if it was a username constraint violation
         if "username" in error_str or "users_username_key" in error_str:
             logger.warning(
-                "user_registration_username_constraint_violation",
+                event="user_registration_username_constraint_violation",
                 request_id=request_id,
                 email=user_data.email,
                 username=user_data.username,
@@ -144,7 +169,7 @@ async def register_user(
         
         # Unknown integrity error
         logger.error(
-            "user_registration_constraint_violation",
+            event="user_registration_constraint_violation",
             request_id=request_id,
             email=user_data.email,
             username=user_data.username,
@@ -180,6 +205,14 @@ async def login_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user"
+        )
+    
+    # Check email verification
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Please check your email for verification link.",
+            headers={"X-Verification-Required": "true"}
         )
     
     # Create access token
@@ -288,3 +321,165 @@ async def get_current_user_info(
 ):
     """Get current authenticated user"""
     return current_user
+
+
+# Email Verification Routes
+
+@router.post(
+    "/send-verification",
+    status_code=status.HTTP_200_OK,
+    summary="Send email verification",
+    response_description="Verification email sent successfully"
+)
+async def send_verification_email(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Send email verification link to the authenticated user.
+    
+    - Generates a secure verification token
+    - Sends verification email with link
+    - Rate limited to 3 emails per hour
+    - Returns success message
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    
+    # Check if already verified
+    if current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+    
+    # Initialize service
+    verification_service = EmailVerificationService(db, notification_service)
+    
+    # Send verification email (handles rate limiting internally)
+    try:
+        verification_service.send_verification_email(current_user, request_id)
+    except HTTPException:
+        raise  # Re-raise rate limit exceptions
+    except Exception as e:
+        logger.error(
+            event="verification_email_send_error",
+            user_id=current_user.id,
+            request_id=request_id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification email"
+        )
+    
+    return {"message": "Verification email sent successfully"}
+
+
+@router.get(
+    "/verify-email",
+    status_code=status.HTTP_200_OK,
+    summary="Verify email address",
+    response_description="Email successfully verified"
+)
+async def verify_email(
+    token: str = Query(..., description="Email verification token"),
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Verify email address using verification token.
+    
+    - Validates token (not expired, not used)
+    - Updates user.is_verified = True
+    - Updates user.email_verified_at = now()
+    - Marks token as used
+    - Returns success message
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    
+    # Initialize service
+    verification_service = EmailVerificationService(db, notification_service)
+    
+    # Verify token
+    success, user = verification_service.verify_token(token)
+    
+    if not success or not user:
+        logger.warning(
+            event="verification_token_invalid",
+            request_id=request_id,
+            token=token[:8] + "..." if len(token) > 8 else "***",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token"
+        )
+    
+    logger.info(
+        event="email_verification_completed",
+        user_id=user.id,
+        request_id=request_id,
+        email=user.email,
+    )
+    
+    return {"message": "Email successfully verified"}
+
+
+@router.post(
+    "/resend-verification",
+    status_code=status.HTTP_200_OK,
+    summary="Resend verification email",
+    response_description="Verification email resent successfully"
+)
+async def resend_verification_email(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Resend email verification link to the authenticated user.
+    
+    - Checks if email is already verified
+    - Generates new verification token
+    - Sends verification email with new link
+    - Rate limited to 3 emails per hour
+    - Returns success message
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    
+    # Check if already verified
+    if current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified"
+        )
+    
+    # Initialize service
+    verification_service = EmailVerificationService(db, notification_service)
+    
+    # Send verification email (handles rate limiting internally)
+    try:
+        verification_service.send_verification_email(current_user, request_id)
+    except HTTPException:
+        raise  # Re-raise rate limit exceptions
+    except Exception as e:
+        logger.error(
+            event="verification_email_resend_error",
+            user_id=current_user.id,
+            request_id=request_id,
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resend verification email"
+        )
+    
+    logger.info(
+        event="verification_email_resent",
+        user_id=current_user.id,
+        request_id=request_id,
+    )
+    
+    return {"message": "Verification email resent successfully"}

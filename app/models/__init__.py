@@ -19,6 +19,7 @@ from .kyc_request import KYCRequest, KYCRequestStatus
 from .document import Document, DocumentType, DocumentStatus
 from .audit_log import AuditLog
 from .user_limit import UserLimit
+from .email_verification_token import EmailVerificationToken
 
 __all__ = [
     "User",
@@ -46,7 +47,8 @@ __all__ = [
     "DocumentType",
     "DocumentStatus",
     "AuditLog",
-    "UserLimit"
+    "UserLimit",
+    "EmailVerificationToken"
 ]
 
 

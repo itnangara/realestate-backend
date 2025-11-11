@@ -35,6 +35,11 @@ class FeatureFlags:
             "role_request_enabled": config("ROLE_REQUEST_ENABLED", default="true", cast=bool),
             "document_upload_enabled": config("DOCUMENT_UPLOAD_ENABLED", default="true", cast=bool),
         }
+        logger.info(
+            "feature_flags_initialized",
+            document_upload_enabled=self.defaults.get("document_upload_enabled"),
+            role_request_enabled=self.defaults.get("role_request_enabled")
+        )
     
     async def _get_redis_client(self) -> Optional[aioredis.Redis]:
         """Get or create Redis client"""
@@ -69,6 +74,7 @@ class FeatureFlags:
             True if enabled, False otherwise
         """
         # Check Redis cache first
+        logger.debug(f"Checking feature flag: {flag_name}")
         redis_client = await self._get_redis_client()
         if redis_client:
             try:
@@ -100,6 +106,13 @@ class FeatureFlags:
         
         # Use default from self.defaults
         value = self.defaults.get(flag_name, False)
+        
+        logger.info(
+            "feature_flag_check",
+            flag_name=flag_name,
+            value=value,
+            source="defaults"
+        )
         
         # Cache the default value
         if redis_client:
