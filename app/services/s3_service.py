@@ -37,14 +37,35 @@ class S3Service:
         
         # Initialize S3 client
         if self.aws_access_key_id and self.aws_secret_access_key:
-            self.s3_client = boto3.client(
-                's3',
-                aws_access_key_id=self.aws_access_key_id,
-                aws_secret_access_key=self.aws_secret_access_key,
-                region_name=self.aws_region
-            )
+            try:
+                self.s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=self.aws_access_key_id,
+                    aws_secret_access_key=self.aws_secret_access_key,
+                    region_name=self.aws_region
+                )
+                logger.info(
+                    "s3_service_initialized",
+                    region=self.aws_region,
+                    bucket_name=self.bucket_name,
+                    pii_bucket=self.pii_bucket,
+                    has_access_key=bool(self.aws_access_key_id),
+                    has_secret_key=bool(self.aws_secret_access_key)
+                )
+            except Exception as e:
+                logger.error(
+                    "s3_service_init_failed",
+                    error=str(e),
+                    region=self.aws_region
+                )
+                self.s3_client = None
         else:
-            logger.warning("AWS credentials not configured - S3 service will not work")
+            logger.warning(
+                "s3_service_no_credentials",
+                has_access_key=bool(self.aws_access_key_id),
+                has_secret_key=bool(self.aws_secret_access_key),
+                message="AWS credentials not configured - S3 service will not work"
+            )
             self.s3_client = None
     
     def generate_presigned_put_url(
@@ -75,8 +96,22 @@ class S3Service:
             bucket = self.pii_bucket if is_pii else self.bucket_name
             key = f"{self.pii_path}{s3_key}" if is_pii else s3_key
             
+            logger.debug(
+                "presigned_url_generation_start",
+                bucket=bucket,
+                key=key,
+                is_pii=is_pii,
+                content_type=content_type,
+                expires_in=expires_in
+            )
+            
             if not bucket:
-                logger.error("S3 bucket name not configured")
+                logger.error(
+                    "s3_bucket_not_configured",
+                    bucket_name=self.bucket_name,
+                    pii_bucket=self.pii_bucket,
+                    is_pii=is_pii
+                )
                 return None
             
             # Generate presigned URL
@@ -95,17 +130,35 @@ class S3Service:
                 bucket=bucket,
                 key=key,
                 expires_in=expires_in,
-                is_pii=is_pii
+                is_pii=is_pii,
+                url_length=len(url) if url else 0
             )
             
             return url
             
         except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown') if hasattr(e, 'response') else 'Unknown'
+            error_message = e.response.get('Error', {}).get('Message', str(e)) if hasattr(e, 'response') else str(e)
             logger.error(
-                "failed_to_generate_presigned_put_url",
-                error=str(e),
+                "failed_to_generate_presigned_put_url_client_error",
+                error_code=error_code,
+                error_message=error_message,
                 s3_key=s3_key,
-                is_pii=is_pii
+                bucket=bucket if 'bucket' in locals() else None,
+                is_pii=is_pii,
+                region=self.aws_region
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                "failed_to_generate_presigned_put_url_unexpected_error",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                s3_key=s3_key,
+                bucket=bucket if 'bucket' in locals() else None,
+                is_pii=is_pii,
+                region=self.aws_region,
+                exc_info=True
             )
             return None
     

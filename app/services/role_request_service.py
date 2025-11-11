@@ -64,12 +64,17 @@ class RoleRequestService:
         # Validate documents if provided
         attachments = None
         if document_ids:
-            # Verify all documents belong to the user
             documents = self.document_service.get_documents_by_ids(document_ids, user_id)
             if len(documents) != len(document_ids):
+                missing_ids = set(document_ids) - {doc.id for doc in documents}
+                logger.warning(
+                    "role_request_documents_not_found",
+                    user_id=user_id,
+                    missing_document_ids=list(missing_ids)
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="One or more documents not found or do not belong to you"
+                    detail=f"Documents not found or do not belong to you: {list(missing_ids)}"
                 )
             
             # Store document IDs as JSON array
@@ -110,7 +115,7 @@ class RoleRequestService:
             requested_roles=requested_roles
         )
         
-        # Enqueue async job for role processing
+        # Enqueue async job for role processing (if celery available)
         try:
             from app.tasks.role_tasks import process_role_request
             process_role_request.delay(role_request.id)
@@ -118,13 +123,16 @@ class RoleRequestService:
                 "role_request_processing_queued",
                 role_request_id=role_request.id
             )
+        except ImportError:
+            logger.debug(
+                "celery_not_available",
+                role_request_id=role_request.id
+            )
         except Exception as e:
-            # Log error but don't fail the request creation
-            logger.error(
-                "failed_to_enqueue_role_request_processing",
+            logger.warning(
+                "failed_to_enqueue_role_request",
                 role_request_id=role_request.id,
-                error=str(e),
-                exc_info=True
+                error=str(e)
             )
         
         return role_request

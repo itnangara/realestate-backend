@@ -90,6 +90,18 @@ class DocumentService:
         
         # Generate presigned PUT URL (PII documents go to separate bucket)
         is_pii = document_type in [DocumentType.ID_FRONT, DocumentType.ID_BACK, DocumentType.PROOF_OF_ADDRESS]
+        
+        logger.info(
+            "document_upload_initiating_s3_url",
+            document_id=document.id,
+            user_id=user_id,
+            s3_key=s3_key,
+            is_pii=is_pii,
+            s3_client_initialized=s3_service.s3_client is not None,
+            bucket_name=s3_service.bucket_name,
+            pii_bucket=s3_service.pii_bucket
+        )
+        
         upload_url = s3_service.generate_presigned_put_url(
             s3_key=s3_key,
             content_type=content_type,
@@ -97,8 +109,22 @@ class DocumentService:
             is_pii=is_pii
         )
         
+        logger.info(
+            "document_upload_s3_url_result",
+            document_id=document.id,
+            upload_url_generated=upload_url is not None,
+            upload_url_length=len(upload_url) if upload_url else 0
+        )
+        
         if not upload_url:
             # Rollback document creation if S3 URL generation fails
+            logger.error(
+                "document_upload_s3_failed_rollback",
+                document_id=document.id,
+                user_id=user_id,
+                s3_key=s3_key,
+                message="S3 URL generation failed - deleting document record"
+            )
             self.db.delete(document)
             self.db.commit()
             raise HTTPException(
