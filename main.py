@@ -22,8 +22,10 @@ from app.monitoring import setup_metrics
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 
+
 # Initialize structured logger
 logger = get_logger(__name__)
+
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -64,17 +66,20 @@ app.add_middleware(
 # If limiter initialization failed, re-initialize and handle gracefully
 if limiter is None:
     logger.warning(
-        "rate_limiter_not_available",
+        event="rate_limiter_not_available",
         message="Rate limiter not initialized - attempting re-initialization"
     )
     limiter = init_limiter()
 
 if limiter is not None:
     app.state.limiter = limiter
-    logger.info("rate_limiter_attached", message="Rate limiter attached to application")
+    logger.info(
+        event="rate_limiter_attached",
+        message="Rate limiter attached to application"
+    )
 else:
     logger.warning(
-        "rate_limiter_disabled",
+        event="rate_limiter_disabled",
         message="Rate limiting disabled - application running without rate limiting protection"
     )
     # Create a dummy limiter state to prevent errors in routes that use @limiter.limit()
@@ -84,45 +89,24 @@ else:
 @app.middleware("http")
 async def add_request_logging(request: Request, call_next):
     """
-    Enterprise-grade request/response logging middleware.
+    Clean request/response logging middleware.
     
     Features:
     - Unique request ID for correlation
-    - Request/response logging with proper log levels
+    - Selective logging (errors, warnings, slow requests)
     - Performance timing
     - User context extraction
-    - Sensitive data masking
     """
     # Generate unique request ID
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
     
     # Extract request context
-    client_host = request.client.host if request.client else "unknown"
     method = request.method
     path = request.url.path
-    query_params = str(request.query_params) if request.query_params else None
     
     # Extract user context if available (set by auth dependencies)
     user_id = getattr(request.state, "user_id", None)
-    user_email = getattr(request.state, "user_email", None)
-    
-    # Check if request has authentication header (for logging context)
-    auth_header = request.headers.get("Authorization", "")
-    has_auth = bool(auth_header and auth_header.startswith("Bearer "))
-    
-    # Log request received
-    logger.info(
-        event="request_received",
-        request_id=request_id,
-        client_ip=client_host,
-        method=method,
-        path=path,
-        query_params=query_params,
-        user_id=user_id,
-        user_email=user_email,
-        has_auth=has_auth,
-    )
     
     # Track request start time
     start_time = time.time()
@@ -134,27 +118,39 @@ async def add_request_logging(request: Request, call_next):
         # Calculate duration
         duration_ms = (time.time() - start_time) * 1000
         
-        # Log request completed with appropriate level based on status code
+        # Log only errors, warnings, or slow requests (>1 second)
         status_code = response.status_code
-        log_data = {
-            "request_id": request_id,
-            "client_ip": client_host,
-            "method": method,
-            "path": path,
-            "status_code": status_code,
-            "duration_ms": round(duration_ms, 2),
-            "user_id": user_id,
-            "user_email": user_email,
-            "event": "request_completed",
-        }
+        is_slow = duration_ms > 1000
         
-        # Use appropriate log level based on status code
         if 400 <= status_code < 500:
-            logger.warning(**log_data)
+            logger.warning(
+                event="request_warning",
+                request_id=request_id,
+                method=method,
+                path=path,
+                status_code=status_code,
+                duration_ms=round(duration_ms, 2),
+                user_id=user_id,
+            )
         elif status_code >= 500:
-            logger.error(**log_data)
-        else:
-            logger.info(**log_data)
+            logger.error(
+                event="request_error",
+                request_id=request_id,
+                method=method,
+                path=path,
+                status_code=status_code,
+                duration_ms=round(duration_ms, 2),
+                user_id=user_id,
+            )
+        elif is_slow:
+            logger.warning(
+                event="slow_request",
+                request_id=request_id,
+                method=method,
+                path=path,
+                duration_ms=round(duration_ms, 2),
+                user_id=user_id,
+            )
         
         # Add request ID to response headers for client correlation
         response.headers["X-Request-ID"] = request_id
@@ -162,21 +158,27 @@ async def add_request_logging(request: Request, call_next):
         return response
         
     except Exception as e:
-        # Log unhandled exceptions
+        # Log unhandled exceptions with conditional stack traces
         duration_ms = (time.time() - start_time) * 1000
-        logger.error(
-            event="request_failed",
-            request_id=request_id,
-            client_ip=client_host,
-            method=method,
-            path=path,
-            duration_ms=round(duration_ms, 2),
-            user_id=user_id,
-            user_email=user_email,
-            error_type=type(e).__name__,
-            error_message=str(e),
-            exc_info=True,
-        )
+        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        include_stack_trace = log_level == "DEBUG"
+        
+        log_data = {
+            "event": "request_failed",
+            "request_id": request_id,
+            "method": method,
+            "path": path,
+            "duration_ms": round(duration_ms, 2),
+            "user_id": user_id,
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+        }
+        
+        # Add stack trace conditionally (for debugging)
+        if include_stack_trace:
+            log_data["exc_info"] = True
+        
+        logger.error(**log_data)
         raise
 
 
@@ -299,20 +301,28 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 # Global exception handler for unhandled exceptions (500 errors)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle all unhandled exceptions with CORS headers"""
+    """Handle all unhandled exceptions with enterprise-grade logging"""
     request_id = getattr(request.state, "request_id", "unknown")
-    client_host = request.client.host if request.client else "unknown"
     
-    logger.error(
-        event="unhandled_exception",
-        request_id=request_id,
-        client_ip=client_host,
-        method=request.method,
-        path=request.url.path,
-        error_type=type(exc).__name__,
-        error_message=str(exc),
-        exc_info=True,
-    )
+    # Determine if we should include stack trace (DEBUG level or ERROR with exc_info)
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    include_stack_trace = log_level == "DEBUG"
+    
+    # Enterprise-grade error logging with conditional stack traces
+    log_data = {
+        "event": "unhandled_exception",
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+        "error_type": type(exc).__name__,
+        "error_message": str(exc),
+    }
+    
+    # Add stack trace conditionally (for debugging)
+    if include_stack_trace:
+        log_data["exc_info"] = True
+    
+    logger.error(**log_data)
     
     response = JSONResponse(
         status_code=500,
