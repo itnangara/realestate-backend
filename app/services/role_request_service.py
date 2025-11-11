@@ -49,7 +49,7 @@ class RoleRequestService:
             request_id: Optional request ID for correlation
             
         Returns:
-            Created RoleRequest object
+            Created or merged RoleRequest object
             
         Raises:
             HTTPException: If feature flag is disabled or validation fails
@@ -63,7 +63,7 @@ class RoleRequestService:
             )
         
         # Validate documents if provided (document_ids are UUIDs)
-        attachments = None
+        new_attachments = None
         if document_ids:
             # Convert UUID strings to list for query
             file_id_strings = [str(doc_id) for doc_id in document_ids]
@@ -84,14 +84,123 @@ class RoleRequestService:
                 )
             
             # Store document file UUIDs as JSON array (for external API exposure)
-            attachments = [str(doc.file_id) for doc in documents]
+            new_attachments = [str(doc.file_id) for doc in documents]
         
-        # Create role request
+        # Step 1: Check for existing pending request with row-level locking
+        # Use with_for_update() to prevent race conditions in concurrent scenarios
+        existing_request = self.db.query(RoleRequest).filter(
+            RoleRequest.user_id == user_id,
+            RoleRequest.status == RoleRequestStatus.PENDING
+        ).with_for_update().first()
+        
+        if existing_request:
+            # Step 2: Merge into existing pending request
+            existing_roles = set(existing_request.requested_roles or [])
+            new_roles_set = set(requested_roles)
+            
+            # Find overlapping and new roles
+            overlapping_roles = existing_roles.intersection(new_roles_set)
+            new_roles_to_add = list(new_roles_set - existing_roles)
+            
+            # Merge roles (only add non-overlapping ones)
+            if new_roles_to_add:
+                existing_request.requested_roles = list(existing_roles) + new_roles_to_add
+                roles_merged = True
+            else:
+                roles_merged = False
+            
+            # Merge attachments (deduplicate using set operations)
+            # Defensive: Ensure attachments is always a list (JSONBType can return list or dict)
+            existing_attachments_raw = existing_request.attachments or []
+            if not isinstance(existing_attachments_raw, list):
+                existing_attachments_raw = []
+            existing_attachments = set(existing_attachments_raw)
+            new_attachments_set = set(new_attachments or [])
+            
+            # Find new attachments to add
+            new_attachments_to_add = list(new_attachments_set - existing_attachments)
+            
+            if new_attachments_to_add:
+                existing_request.attachments = list(existing_attachments) + new_attachments_to_add
+                attachments_merged = True
+            else:
+                attachments_merged = False
+            
+            # Merge notes (append with separator)
+            if notes:
+                if existing_request.notes:
+                    existing_request.notes = f"{existing_request.notes}\n\n---\n\n{notes}"
+                else:
+                    existing_request.notes = notes
+                notes_merged = True
+            else:
+                notes_merged = False
+            
+            # Commit merge changes atomically
+            self.db.commit()
+            self.db.refresh(existing_request)
+            
+            # Audit log for merge operation
+            merge_meta = {
+                "existing_request_id": existing_request.id,
+                "new_roles_submitted": requested_roles,
+                "overlapping_roles": list(overlapping_roles),
+                "roles_added": new_roles_to_add if roles_merged else [],
+                "attachments_added": new_attachments_to_add if attachments_merged else [],
+                "notes_appended": notes_merged
+            }
+            if document_ids:
+                merge_meta["document_ids"] = [str(doc_id) for doc_id in document_ids]
+            
+            audit_service.log_user_action(
+                db=self.db,
+                action="role_request_merged",
+                user_id=user_id,
+                target_type="role_request",
+                target_id=existing_request.id,
+                meta=merge_meta,
+                request_id=request_id
+            )
+            
+            logger.info(
+                "role_request_merged",
+                role_request_id=existing_request.id,
+                user_id=user_id,
+                existing_roles=list(existing_roles),
+                new_roles_added=new_roles_to_add,
+                overlapping_roles=list(overlapping_roles),
+                attachments_added=new_attachments_to_add
+            )
+            
+            # Enqueue async job only if new roles were added (avoid duplicate processing)
+            if roles_merged:
+                try:
+                    from app.tasks.role_tasks import process_role_request
+                    process_role_request.delay(existing_request.id)
+                    logger.info(
+                        "role_request_processing_queued",
+                        role_request_id=existing_request.id
+                    )
+                except ImportError:
+                    logger.debug(
+                        "celery_not_available",
+                        role_request_id=existing_request.id
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "failed_to_enqueue_role_request",
+                        role_request_id=existing_request.id,
+                        error=str(e)
+                    )
+            
+            return existing_request
+        
+        # Step 3: No existing pending request - create new one
         role_request = RoleRequest(
             user_id=user_id,
             requested_roles=requested_roles,
             status=RoleRequestStatus.PENDING,
-            attachments=attachments,
+            attachments=new_attachments,
             notes=notes
         )
         
@@ -99,7 +208,7 @@ class RoleRequestService:
         self.db.commit()
         self.db.refresh(role_request)
         
-        # Audit log - convert UUID objects to strings for JSON serialization
+        # Audit log for new request creation
         meta = {
             "requested_roles": requested_roles,
             "notes": notes
