@@ -328,6 +328,28 @@ class PropertyService:
     
     # ==================== Enterprise-Grade Role-Aware Methods ====================
     
+    def get_properties_marketplace(
+        self,
+        filters: PropertySearchFilters,
+        skip: int = 0,
+        limit: int = 20
+    ) -> Tuple[List[Property], int]:
+        """        
+        Shows all ACTIVE properties with public listing types to everyone.
+        """
+        query = self.db.query(Property)
+        
+        # Marketplace: Everyone sees all active properties (public marketplace view)
+        # No ownership filtering, no role-based filtering
+        query = query.filter(
+            Property.status == PropertyStatus.ACTIVE,
+            Property.is_active == True,
+            Property.listing_type.in_([lt.value for lt in PUBLIC_LISTING_TYPES])  # Only public listing types
+        )
+        
+        # Apply additional filters from PropertySearchFilters
+        return self._apply_filters_and_paginate(query, filters, skip, limit)
+    
     def get_properties_for_role(
         self,
         user: Optional[User],
@@ -336,28 +358,6 @@ class PropertyService:
         limit: int = 20,
         role_context: Optional[str] = None
     ) -> Tuple[List[Property], int]:
-        """
-        Enterprise-grade role-aware property listing with role-context support.
-        
-        Rules:
-        - Public/Guest: Only ACTIVE + public listing types (FOR_SALE, FOR_RENT, FOR_LEASE)
-        - Buyer/Tenant: Same as public
-        - Owner roles (Seller/Agent/Landlord/Investor): "My Listings" mode
-          * If role_context provided: Only own properties matching that role's listing types
-          * If role_context is None: Own properties matching any of user's owner roles (backward compatible)
-        - Admin: All properties (any status, excluding DELETED - use get_all_properties_admin() to see deleted)
-        
-        Args:
-            user: The user (None for public/guest)
-            filters: Search filters
-            skip: Pagination offset
-            limit: Pagination limit
-            role_context: Optional role context (seller, agent, landlord, investor)
-                         For role-context-aware dashboards. Must be one of user's roles.
-            
-        Returns:
-            Tuple of (properties list, total count)
-        """
         query = self.db.query(Property)
         
         # Role-based visibility filtering
@@ -423,20 +423,36 @@ class PropertyService:
                 )
         
         # Apply additional filters from PropertySearchFilters
+        return self._apply_filters_and_paginate(query, filters, skip, limit, user)
+    
+    def _apply_filters_and_paginate(
+        self,
+        query,
+        filters: PropertySearchFilters,
+        skip: int,
+        limit: int,
+        user: Optional[User] = None
+    ) -> Tuple[List[Property], int]:
+        """
+        Shared logic for both marketplace and role-based property queries.
+        """
+        # Price filters
         if filters.price_min is not None:
             query = query.filter(Property.price >= filters.price_min)
         if filters.price_max is not None:
             query = query.filter(Property.price <= filters.price_max)
         
+        # Property type filter
         if filters.property_type is not None:
             query = query.filter(Property.property_type == filters.property_type)
         
-        # Listing type filtering (already filtered by role above, but allow further refinement)
+        # Listing type filtering (allows further refinement of listing types)
         if filters.listing_types is not None and len(filters.listing_types) > 0:
             query = query.filter(Property.listing_type.in_([lt.value for lt in filters.listing_types]))
         elif filters.listing_type is not None:
             query = query.filter(Property.listing_type == filters.listing_type.value)
         
+        # Property details filters
         if filters.bedrooms is not None:
             query = query.filter(Property.bedrooms >= filters.bedrooms)
         if filters.bathrooms is not None:
@@ -462,7 +478,7 @@ class PropertyService:
             conditions = [Property.features.contains([feature]) for feature in feature_list]
             query = query.filter(Property.features.isnot(None), or_(*conditions))
         
-        # Status filter (if not already filtered by role)
+        # Status filter (if not already filtered by role/marketplace)
         if filters.status is not None:
             if not user or (user and not user.has_role("admin")):
                 # Only allow ACTIVE status for non-admin
@@ -473,6 +489,7 @@ class PropertyService:
                 if filters.status != PropertyStatus.DELETED:
                     query = query.filter(Property.status == filters.status)
         
+        # Metadata filters
         if filters.is_featured is not None:
             query = query.filter(Property.is_featured == filters.is_featured)
         if filters.year_built_min is not None:

@@ -199,7 +199,7 @@ async def search_properties_get(
     features: Optional[str] = Query(None),
     listing_type: Optional[str] = Query(None, description="Single listing type (for_sale, for_rent, etc.) - for backward compatibility"),
     listing_types: Optional[str] = Query(None, description="Comma-separated listing types (e.g., 'for_rent,for_lease') - supports multiple values"),
-    status: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by property status"),
     is_featured: Optional[bool] = Query(None),
     year_built_min: Optional[int] = Query(None, ge=1800, le=2030),
     year_built_max: Optional[int] = Query(None, ge=1800, le=2030),
@@ -249,11 +249,11 @@ async def search_properties_get(
         except ValueError:
             pass  # Invalid value will be handled by schema validation
     
-    # 2. Convert status string to enum
+    # 2. Convert status_filter string to enum
     status_enum = None
-    if status:
+    if status_filter:
         try:
-            status_enum = PropertyStatus(status)
+            status_enum = PropertyStatus(status_filter)
         except ValueError:
             pass  # Invalid value will be handled by schema validation
     
@@ -316,49 +316,17 @@ async def search_properties_get(
             detail=e.errors()
         )
     
-    # Enterprise-grade strictness: Authenticated owner-role users MUST provide role_context
-    owner_roles = ["seller", "agent", "landlord", "investor"]
-    if user and not user.has_role("admin"):
-        if any(user.has_role(role) for role in owner_roles):
-            if not role_context:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"role_context is required for owner-role users. Available roles: {', '.join([r for r in user.roles if r in owner_roles])}. "
-                           f"Please specify role_context parameter (e.g., ?role_context=seller)"
-                )
+    # Public search endpoint: Everyone sees marketplace view (same as public/guest)
+    # role_context is ignored on search endpoints - all users see public listings
+    # This is intentional: search is for browsing, not "My Listings"
     
-    # Validate role_context if provided (same validation logic as main endpoint)
-    validated_role_context = None
-    if role_context:
-        role_context = role_context.lower().strip()
-        valid_owner_roles = ["seller", "agent", "landlord", "investor"]
-        if role_context not in valid_owner_roles:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid role_context. Must be one of: {', '.join(valid_owner_roles)}"
-            )
-        if user:
-            if role_context not in user.roles:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"User does not have role '{role_context}'. Available roles: {', '.join(user.roles)}"
-                )
-            validated_role_context = role_context
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="role_context requires authentication"
-            )
-    
-    # Enterprise-grade: Use role-aware search
+    # Enterprise-grade: Use dedicated marketplace method (secure - no ownership filtering)
     service = PropertyService(db)
     skip = (filters.page - 1) * filters.limit
-    properties, total_count = service.get_properties_for_role(
-        user=user,
+    properties, total_count = service.get_properties_marketplace(
         filters=filters,
         skip=skip,
-        limit=filters.limit,
-        role_context=validated_role_context
+        limit=filters.limit
     )
     return PropertySearchResponse(
         properties=[PropertyResponse.model_validate(p) for p in properties],
@@ -802,49 +770,17 @@ async def search_properties_post(
     Supports advanced filtering: price, bedrooms, bathrooms, square_feet, location,
     features, year_built, sorting, and pagination.
     """
-    # Enterprise-grade strictness: Authenticated owner-role users MUST provide role_context
-    owner_roles = ["seller", "agent", "landlord", "investor"]
-    if user and not user.has_role("admin"):
-        if any(user.has_role(role) for role in owner_roles):
-            if not role_context:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"role_context is required for owner-role users. Available roles: {', '.join([r for r in user.roles if r in owner_roles])}. "
-                           f"Please specify role_context parameter (e.g., ?role_context=seller)"
-                )
+    # Public search endpoint (POST): Everyone sees marketplace view (same as public/guest)
+    # role_context is ignored on search endpoints - all users see public listings
+    # This is intentional: search is for browsing, not "My Listings"
     
-    # Validate role_context if provided
-    validated_role_context = None
-    if role_context:
-        role_context = role_context.lower().strip()
-        valid_owner_roles = ["seller", "agent", "landlord", "investor"]
-        if role_context not in valid_owner_roles:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid role_context. Must be one of: {', '.join(valid_owner_roles)}"
-            )
-        if user:
-            if role_context not in user.roles:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"User does not have role '{role_context}'. Available roles: {', '.join(user.roles)}"
-                )
-            validated_role_context = role_context
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="role_context requires authentication"
-            )
-    
-    # Enterprise-grade: Use role-aware search
+    # Enterprise-grade: Use dedicated marketplace method (secure - no ownership filtering)
     service = PropertyService(db)
     skip = (filters.page - 1) * filters.limit
-    properties, total_count = service.get_properties_for_role(
-        user=user,
+    properties, total_count = service.get_properties_marketplace(
         filters=filters,
         skip=skip,
-        limit=filters.limit,
-        role_context=validated_role_context
+        limit=filters.limit
     )
     return PropertySearchResponse(
         properties=[PropertyResponse.model_validate(p) for p in properties],
