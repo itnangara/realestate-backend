@@ -3,19 +3,26 @@ Admin routes for moderation and management
 
 Endpoints:
 - GET /api/admin/role-requests - List role requests with filters
+- GET /api/admin/role-requests/{id} - Get role request details with documents
 - POST /api/admin/role-requests/{id}/approve - Approve role request
 - POST /api/admin/role-requests/{id}/reject - Reject role request
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 
 from app.utils.database import get_db
-from app.schemas.role_request import RoleRequestResponse, RoleRequestListResponse
+from app.schemas.admin import (
+    AdminRoleRequestResponse, 
+    AdminRoleRequestListResponse,
+    DocumentAttachmentResponse,
+    RoleRequestRejectRequest
+)
 from app.services.role_request_service import RoleRequestService
 from app.services.role_granting_service import RoleGrantingService
+from app.services.document_service import DocumentService
 from app.models.role_request import RoleRequest, RoleRequestStatus
 from app.dependencies.authorization_dependencies import get_admin_user
 from app.models.user import User
@@ -37,12 +44,13 @@ def get_role_granting_service(db: Session = Depends(get_db)) -> RoleGrantingServ
 
 @router.get(
     "/role-requests",
-    response_model=RoleRequestListResponse,
+    response_model=AdminRoleRequestListResponse,
     summary="List role requests (admin only)",
-    response_description="List of role requests with optional filters"
+    response_description="List of role requests with optional filters and document attachments"
 )
 async def list_role_requests(
     status_filter: Optional[RoleRequestStatus] = Query(None, description="Filter by status"),
+    user_id: Optional[int] = Query(None, description="Filter by user ID"),
     role: Optional[str] = Query(None, description="Filter by requested role"),
     date_from: Optional[datetime] = Query(None, description="Filter by date from"),
     date_to: Optional[datetime] = Query(None, description="Filter by date to"),
@@ -52,55 +60,96 @@ async def list_role_requests(
     db: Session = Depends(get_db)
 ):
     """
-    List all role requests with optional filters.
+    List all role requests with optional filters and document attachments.
     
     **Admin-only endpoint** - Only users with admin role can access this.
     
     Query parameters:
     - status: Filter by status (pending, in_review, approved, rejected)
+    - user_id: Filter by specific user ID
     - role: Filter by requested role name
     - date_from: Filter requests from this date
     - date_to: Filter requests until this date
     - limit: Maximum number of results (1-100, default 50)
     - offset: Number of results to skip (for pagination)
     """
-    query = db.query(RoleRequest)
+    role_request_service = RoleRequestService(db)
+    document_service = DocumentService(db)
     
-    # Apply filters
+    # Get role requests with filters
+    requests = role_request_service.get_role_requests_with_documents(
+        status_filter=status_filter,
+        user_id_filter=user_id,
+        role_filter=role,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset
+    )
+    
+    # Get total count for pagination
+    query = db.query(RoleRequest)
     if status_filter:
         query = query.filter(RoleRequest.status == status_filter)
-    
+    if user_id:
+        query = query.filter(RoleRequest.user_id == user_id)
     if role:
-        # Filter by role in requested_roles array (PostgreSQL ARRAY contains)
         query = query.filter(RoleRequest.requested_roles.contains([role]))
-    
     if date_from:
         query = query.filter(RoleRequest.requested_at >= date_from)
-    
     if date_to:
         query = query.filter(RoleRequest.requested_at <= date_to)
-    
-    # Get total count before pagination
     total = query.count()
     
-    # Apply pagination
-    requests = query.order_by(RoleRequest.requested_at.desc()).offset(offset).limit(limit).all()
+    # Build response with document attachments
+    requests_with_docs = []
+    for req in requests:
+        attachments = []
+        if req.attachments:
+            # Get documents by file_ids (UUIDs)
+            file_id_strings = [str(att) for att in req.attachments]
+            documents = document_service.get_documents_by_file_ids_admin(file_id_strings)
+            
+            # Get documents with presigned URLs
+            docs_with_urls = document_service.get_documents_with_urls(documents, expires_in=3600)
+            
+            # Convert to DocumentAttachmentResponse
+            attachments = [
+                DocumentAttachmentResponse(**doc_data) 
+                for doc_data in docs_with_urls
+            ]
+        
+        requests_with_docs.append(AdminRoleRequestResponse(
+            id=req.id,
+            user_id=req.user_id,
+            requested_roles=req.requested_roles,
+            status=req.status,
+            requested_at=req.requested_at,
+            reviewed_by=req.reviewed_by,
+            reviewed_at=req.reviewed_at,
+            notes=req.notes,
+            attachments=attachments,
+            trust_score=req.trust_score
+        ))
     
-    # Defensive: Ensure requests is always a list (never None)
-    # Enterprise-grade: Consistent type safety across all endpoints
-    requests_list = requests if requests is not None else []
+    logger.info(
+        "admin_role_requests_listed",
+        admin_user_id=admin_user.id,
+        total=total,
+        returned=len(requests_with_docs)
+    )
     
-    return RoleRequestListResponse(
-        requests=[RoleRequestResponse.model_validate(req) for req in requests_list],
+    return AdminRoleRequestListResponse(
+        requests=requests_with_docs,
         total=total
     )
 
 
 @router.get(
     "/role-requests/{role_request_id}",
-    response_model=RoleRequestResponse,
+    response_model=AdminRoleRequestResponse,
     summary="Get role request details (admin only)",
-    response_description="Detailed information about a specific role request"
+    response_description="Detailed information about a specific role request with document attachments"
 )
 async def get_role_request(
     role_request_id: int,
@@ -108,18 +157,19 @@ async def get_role_request(
     db: Session = Depends(get_db)
 ):
     """
-    Get detailed information about a specific role request.
+    Get detailed information about a specific role request with document attachments.
     
     **Admin-only endpoint** - Only users with admin role can access this.
     
     Returns:
     - Role request details
-    - Attached documents
-    - KYC status (if applicable)
+    - Attached documents with presigned URLs
     - Review history
     """
-    service = RoleRequestService(db)
-    role_request = service.get_role_request(role_request_id)
+    role_request_service = RoleRequestService(db)
+    document_service = DocumentService(db)
+    
+    role_request = role_request_service.get_role_request_with_documents(role_request_id)
     
     if not role_request:
         raise HTTPException(
@@ -127,12 +177,41 @@ async def get_role_request(
             detail="Role request not found"
         )
     
-    return RoleRequestResponse.model_validate(role_request)
+    # Get document attachments with URLs
+    attachments = []
+    if role_request.attachments:
+        file_id_strings = [str(att) for att in role_request.attachments]
+        documents = document_service.get_documents_by_file_ids_admin(file_id_strings)
+        docs_with_urls = document_service.get_documents_with_urls(documents, expires_in=3600)
+        attachments = [
+            DocumentAttachmentResponse(**doc_data) 
+            for doc_data in docs_with_urls
+        ]
+    
+    logger.info(
+        "admin_role_request_retrieved",
+        admin_user_id=admin_user.id,
+        role_request_id=role_request_id,
+        attachments_count=len(attachments)
+    )
+    
+    return AdminRoleRequestResponse(
+        id=role_request.id,
+        user_id=role_request.user_id,
+        requested_roles=role_request.requested_roles,
+        status=role_request.status,
+        requested_at=role_request.requested_at,
+        reviewed_by=role_request.reviewed_by,
+        reviewed_at=role_request.reviewed_at,
+        notes=role_request.notes,
+        attachments=attachments,
+        trust_score=role_request.trust_score
+    )
 
 
 @router.post(
     "/role-requests/{role_request_id}/approve",
-    response_model=RoleRequestResponse,
+    response_model=AdminRoleRequestResponse,
     status_code=status.HTTP_200_OK,
     summary="Approve role request (admin only)",
     response_description="Approved role request with roles granted"
@@ -156,26 +235,55 @@ async def approve_role_request(
     """
     request_id = getattr(request.state, 'request_id', None)
     
-    service = RoleGrantingService(db)
-    role_request = service.approve_role_request(
+    role_granting_service = RoleGrantingService(db)
+    role_request = role_granting_service.approve_role_request(
         role_request_id=role_request_id,
         approved_by=admin_user.id,
         request_id=request_id
     )
     
-    return RoleRequestResponse.model_validate(role_request)
+    # Get document attachments with URLs
+    document_service = DocumentService(db)
+    attachments = []
+    if role_request.attachments:
+        file_id_strings = [str(att) for att in role_request.attachments]
+        documents = document_service.get_documents_by_file_ids_admin(file_id_strings)
+        docs_with_urls = document_service.get_documents_with_urls(documents, expires_in=3600)
+        attachments = [
+            DocumentAttachmentResponse(**doc_data) 
+            for doc_data in docs_with_urls
+        ]
+    
+    logger.info(
+        "admin_role_request_approved",
+        admin_user_id=admin_user.id,
+        role_request_id=role_request_id
+    )
+    
+    return AdminRoleRequestResponse(
+        id=role_request.id,
+        user_id=role_request.user_id,
+        requested_roles=role_request.requested_roles,
+        status=role_request.status,
+        requested_at=role_request.requested_at,
+        reviewed_by=role_request.reviewed_by,
+        reviewed_at=role_request.reviewed_at,
+        notes=role_request.notes,
+        attachments=attachments,
+        trust_score=role_request.trust_score
+    )
 
 
 @router.post(
     "/role-requests/{role_request_id}/reject",
-    response_model=RoleRequestResponse,
+    response_model=AdminRoleRequestResponse,
     status_code=status.HTTP_200_OK,
     summary="Reject role request (admin only)",
     response_description="Rejected role request"
 )
 async def reject_role_request(
     role_request_id: int,
-    reason: Optional[str] = None,
+    reject_data: Optional[RoleRequestRejectRequest] = Body(None),
     admin_user: User = Depends(get_admin_user),
     db: Session = Depends(get_db),
     request: Request = None
@@ -195,13 +303,45 @@ async def reject_role_request(
     """
     request_id = getattr(request.state, 'request_id', None)
     
-    service = RoleGrantingService(db)
-    role_request = service.reject_role_request(
+    reason = reject_data.reason if reject_data else None
+    
+    role_granting_service = RoleGrantingService(db)
+    role_request = role_granting_service.reject_role_request(
         role_request_id=role_request_id,
         rejected_by=admin_user.id,
         reason=reason,
         request_id=request_id
     )
     
-    return RoleRequestResponse.model_validate(role_request)
+    # Get document attachments with URLs
+    document_service = DocumentService(db)
+    attachments = []
+    if role_request.attachments:
+        file_id_strings = [str(att) for att in role_request.attachments]
+        documents = document_service.get_documents_by_file_ids_admin(file_id_strings)
+        docs_with_urls = document_service.get_documents_with_urls(documents, expires_in=3600)
+        attachments = [
+            DocumentAttachmentResponse(**doc_data) 
+            for doc_data in docs_with_urls
+        ]
+    
+    logger.info(
+        "admin_role_request_rejected",
+        admin_user_id=admin_user.id,
+        role_request_id=role_request_id,
+        has_reason=reason is not None
+    )
+    
+    return AdminRoleRequestResponse(
+        id=role_request.id,
+        user_id=role_request.user_id,
+        requested_roles=role_request.requested_roles,
+        status=role_request.status,
+        requested_at=role_request.requested_at,
+        reviewed_by=role_request.reviewed_by,
+        reviewed_at=role_request.reviewed_at,
+        notes=role_request.notes,
+        attachments=attachments,
+        trust_score=role_request.trust_score
+    )
 

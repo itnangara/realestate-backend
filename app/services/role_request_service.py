@@ -10,6 +10,7 @@ Handles:
 
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
 from fastapi import HTTPException, status
 
 from app.models.role_request import RoleRequest, RoleRequestStatus
@@ -303,6 +304,72 @@ class RoleRequestService:
             query = query.filter(RoleRequest.user_id == user_id)
         
         return query.first()
+    
+    def get_role_request_with_documents(
+        self,
+        role_request_id: int
+    ) -> Optional[RoleRequest]:
+        """
+        Get role request by ID with documents for admin access
+        
+        Args:
+            role_request_id: ID of the role request
+            
+        Returns:
+            RoleRequest object or None if not found
+        """
+        role_request = self.db.query(RoleRequest).filter(
+            RoleRequest.id == role_request_id
+        ).first()
+        
+        return role_request
+    
+    def get_role_requests_with_documents(
+        self,
+        status_filter: Optional[RoleRequestStatus] = None,
+        user_id_filter: Optional[int] = None,
+        role_filter: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[RoleRequest]:
+        """
+        Get role requests with filters for admin access
+        
+        Args:
+            status_filter: Optional filter by status
+            user_id_filter: Optional filter by user ID
+            role_filter: Optional filter by requested role name
+            date_from: Optional filter by date from
+            date_to: Optional filter by date to
+            limit: Maximum number of results
+            offset: Number of results to skip
+            
+        Returns:
+            List of RoleRequest objects
+        """
+        query = self.db.query(RoleRequest)
+        
+        if status_filter:
+            query = query.filter(RoleRequest.status == status_filter)
+        
+        if user_id_filter:
+            query = query.filter(RoleRequest.user_id == user_id_filter)
+        
+        if role_filter:
+            # Filter by role in requested_roles array
+            # For PostgreSQL ARRAY, use contains; for SQLite JSON, filter in Python
+            query = query.filter(RoleRequest.requested_roles.contains([role_filter]))
+        
+        if date_from:
+            query = query.filter(RoleRequest.requested_at >= date_from)
+        
+        if date_to:
+            query = query.filter(RoleRequest.requested_at <= date_to)
+        
+        results = query.order_by(RoleRequest.requested_at.desc()).offset(offset).limit(limit).all()
+        return results if results is not None else []
     
     async def check_kyc_required(
         self,

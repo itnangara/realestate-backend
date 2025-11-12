@@ -427,6 +427,74 @@ class DocumentService:
             Document.user_id == user_id
         ).all()
     
+    def get_documents_by_file_ids_admin(
+        self,
+        file_ids: List[str]
+    ) -> List[Document]:
+        """
+        Get multiple documents by file UUIDs (admin access - no user_id check)
+        
+        Args:
+            file_ids: List of file UUID strings
+            
+        Returns:
+            List of Document objects
+        """
+        from uuid import UUID
+        if not file_ids:
+            return []
+        
+        try:
+            uuids = [UUID(fid) for fid in file_ids]
+        except ValueError as e:
+            logger.warning(
+                "invalid_file_uuid_format_admin",
+                file_ids=file_ids,
+                error=str(e)
+            )
+            return []
+        
+        return self.db.query(Document).filter(
+            Document.file_id.in_(uuids)
+        ).all()
+    
+    def get_documents_with_urls(
+        self,
+        documents: List[Document],
+        expires_in: int = 3600
+    ) -> List[dict]:
+        """
+        Get documents with presigned URLs for admin access
+        
+        Args:
+            documents: List of Document objects
+            expires_in: URL expiration time in seconds (default 1 hour)
+            
+        Returns:
+            List of dictionaries with document details and presigned URLs
+        """
+        result = []
+        for doc in documents:
+            is_pii = doc.type in [DocumentType.ID_FRONT, DocumentType.ID_BACK, DocumentType.PROOF_OF_ADDRESS]
+            download_url = s3_service.generate_presigned_get_url(
+                s3_key=doc.s3_key,
+                expires_in=expires_in,
+                is_pii=is_pii
+            )
+            
+            result.append({
+                "id": doc.id,
+                "file_id": doc.file_id,
+                "file_name": doc.file_name,
+                "url": download_url or "",
+                "type": doc.type.value,
+                "size": doc.size,
+                "status": doc.status.value,
+                "uploaded_at": doc.uploaded_at
+            })
+        
+        return result
+    
     
     async def delete_document(
         self,
