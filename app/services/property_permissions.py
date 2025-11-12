@@ -210,7 +210,7 @@ class PropertyPermissionService:
         return PUBLIC_LISTING_TYPES
     
     @staticmethod
-    def get_owner_listing_types(user: User) -> List[ListingType]:
+    def get_owner_listing_types(user: User, role_context: Optional[str] = None) -> List[ListingType]:
         """
         Get listing types that an owner role can create/own.
         
@@ -219,16 +219,31 @@ class PropertyPermissionService:
         
         Args:
             user: The authenticated user with owner role
+            role_context: Optional role context (seller, agent, landlord, investor)
+                         If provided, filters by this specific role only.
+                         Must be one of the user's roles.
             
         Returns:
-            List of ListingType enums the user's role can own
+            List of ListingType enums the user's role(s) can own
         """
-        allowed_types = []
         owner_roles = ["seller", "agent", "landlord", "investor"]
+        allowed_types = []
         
-        for role in user.roles:
-            if role in owner_roles and role in LISTING_TYPE_CREATE_PERMISSIONS:
-                allowed_types.extend(LISTING_TYPE_CREATE_PERMISSIONS[role])
+        # Role-context-aware filtering: if role_context provided, use only that role
+        if role_context:
+            # Validate role_context is one of user's roles
+            if role_context not in user.roles:
+                # Invalid role context - return empty list (user doesn't have this role)
+                return []
+            
+            # Validate role_context is an owner role
+            if role_context in owner_roles and role_context in LISTING_TYPE_CREATE_PERMISSIONS:
+                allowed_types.extend(LISTING_TYPE_CREATE_PERMISSIONS[role_context])
+        else:
+            # Backward compatible: union of all user's owner roles
+            for role in user.roles:
+                if role in owner_roles and role in LISTING_TYPE_CREATE_PERMISSIONS:
+                    allowed_types.extend(LISTING_TYPE_CREATE_PERMISSIONS[role])
         
         # Remove duplicates while preserving order
         return list(dict.fromkeys(allowed_types))

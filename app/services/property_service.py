@@ -333,15 +333,18 @@ class PropertyService:
         user: Optional[User],
         filters: PropertySearchFilters,
         skip: int = 0,
-        limit: int = 20
+        limit: int = 20,
+        role_context: Optional[str] = None
     ) -> Tuple[List[Property], int]:
         """
-        Enterprise-grade role-aware property listing.
+        Enterprise-grade role-aware property listing with role-context support.
         
         Rules:
         - Public/Guest: Only ACTIVE + public listing types (FOR_SALE, FOR_RENT, FOR_LEASE)
         - Buyer/Tenant: Same as public
-        - Owner roles (Seller/Agent/Landlord/Investor): ACTIVE + their own properties (any status, except DELETED)
+        - Owner roles (Seller/Agent/Landlord/Investor): "My Listings" mode
+          * If role_context provided: Only own properties matching that role's listing types
+          * If role_context is None: Own properties matching any of user's owner roles (backward compatible)
         - Admin: All properties (any status, excluding DELETED - use get_all_properties_admin() to see deleted)
         
         Args:
@@ -349,6 +352,8 @@ class PropertyService:
             filters: Search filters
             skip: Pagination offset
             limit: Pagination limit
+            role_context: Optional role context (seller, agent, landlord, investor)
+                         For role-context-aware dashboards. Must be one of user's roles.
             
         Returns:
             Tuple of (properties list, total count)
@@ -386,22 +391,27 @@ class PropertyService:
             owner_roles = ["seller", "agent", "landlord", "investor"]
             if any(user.has_role(role) for role in owner_roles):
                 # Enterprise-grade: Authenticated owners see ONLY their own properties
-                # with role-specific listing type filtering
+                # with role-context-aware listing type filtering
                 from app.services.property_permissions import PropertyPermissionService
                 
-                # Get role-specific listing types
-                allowed_listing_types = PropertyPermissionService.get_owner_listing_types(user)
+                # Get role-context-aware listing types
+                # If role_context provided, filters by that specific role only
+                # If None, returns union of all user's owner roles (backward compatible)
+                allowed_listing_types = PropertyPermissionService.get_owner_listing_types(
+                    user, 
+                    role_context=role_context
+                )
                 
                 if allowed_listing_types:
                     query = query.filter(
                         and_(
                             Property.owner_id == user.id,  # Only own properties
                             Property.status != PropertyStatus.DELETED,  # Exclude deleted
-                            Property.listing_type.in_([lt.value for lt in allowed_listing_types])  # Role-specific types
+                            Property.listing_type.in_([lt.value for lt in allowed_listing_types])  # Role-context-aware types
                         )
                     )
                 else:
-                    # No allowed listing types for this role - return empty
+                    # No allowed listing types for this role context - return empty
                     query = query.filter(Property.id == -1)  # Impossible condition
             else:
                 # Fallback: Public only (same granular filtering as public/guest)
@@ -746,5 +756,6 @@ class PropertyService:
         )
         
         return True
+
 
 

@@ -42,25 +42,33 @@ async def get_properties(
     status: Optional[str] = Query(None, description="Filter by property status"),
     min_price: Optional[float] = Query(None, ge=0, description="Minimum price filter"),
     max_price: Optional[float] = Query(None, ge=0, description="Maximum price filter"),
+    role_context: Optional[str] = Query(None, description="Role context for role-context-aware dashboards (seller, agent, landlord, investor). Must be one of user's roles."),
     user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db)
 ):
     """
-    Enterprise-grade role-aware property listing.
+    Enterprise-grade role-aware property listing with role-context support.
     
     Behavior:
     - Public/Guest: Only ACTIVE + public listing types (FOR_SALE, FOR_RENT, FOR_LEASE)
     - Buyer/Tenant: Same as public (marketplace view)
     - Owner roles (Seller/Agent/Landlord/Investor): "My Listings" mode
       * Authenticated owners see ONLY their own properties
-      * Role-specific listing type filtering applied automatically:
-        - Seller: only for_sale properties
-        - Agent: only for_sale + for_rent properties
-        - Landlord: only for_rent properties
-        - Investor: only for_portfolio properties
+      * Role-context-aware listing type filtering:
+        - If role_context provided: Only properties matching that role's listing types
+          * Seller context: only for_sale properties
+          * Agent context: only for_sale + for_rent properties
+          * Landlord context: only for_rent properties
+          * Investor context: only for_portfolio properties
+        - If role_context is None: Properties matching any of user's owner roles (backward compatible)
       * All statuses except DELETED
       * No other users' listings included
     - Admin: All properties (any status, excluding DELETED - use /all endpoint to see deleted)
+    
+    Role-Context-Aware Dashboards:
+    - Pass role_context parameter to filter by specific role (e.g., role_context=seller)
+    - role_context must be one of the authenticated user's roles
+    - If invalid role_context provided, returns empty results
     
     "My Listings" pages: Simply call this endpoint with authentication.
     Ownership and role filtering are automatically inferred from JWT token.
@@ -92,6 +100,53 @@ async def get_properties(
     # Normalize empty strings
     city = city or None
     
+    # Enterprise-grade strictness: Authenticated owner-role users MUST provide role_context
+    # This prevents accidental data leakage from union of all roles
+    owner_roles = ["seller", "agent", "landlord", "investor"]
+    if user and not user.has_role("admin"):
+        # Check if user has any owner role
+        if any(user.has_role(role) for role in owner_roles):
+            # Owner-role user must provide role_context for strict dashboard filtering
+            if not role_context:
+                from fastapi import HTTPException, status
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"role_context is required for owner-role users. Available roles: {', '.join([r for r in user.roles if r in owner_roles])}. "
+                           f"Please specify role_context parameter (e.g., ?role_context=seller)"
+                )
+    
+    # Validate role_context if provided
+    validated_role_context = None
+    if role_context:
+        # Normalize role_context to lowercase
+        role_context = role_context.lower().strip()
+        
+        # Validate role_context is a valid owner role
+        valid_owner_roles = ["seller", "agent", "landlord", "investor"]
+        if role_context not in valid_owner_roles:
+            from fastapi import HTTPException, status
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role_context. Must be one of: {', '.join(valid_owner_roles)}"
+            )
+        
+        # Validate user has this role (if authenticated)
+        if user:
+            if role_context not in user.roles:
+                from fastapi import HTTPException, status
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"User does not have role '{role_context}'. Available roles: {', '.join(user.roles)}"
+                )
+            validated_role_context = role_context
+        else:
+            # Public/guest cannot use role_context
+            from fastapi import HTTPException, status
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="role_context requires authentication"
+            )
+    
     # Build filters
     filters = PropertySearchFilters(
         price_min=min_price,
@@ -109,7 +164,8 @@ async def get_properties(
         user=user,
         filters=filters,
         skip=skip,
-        limit=limit
+        limit=limit,
+        role_context=validated_role_context
     )
     
     return PropertySearchResponse(
@@ -151,18 +207,21 @@ async def search_properties_get(
     limit: int = Query(20, ge=1, le=100),
     sort_by: str = Query("created_at"),
     sort_order: str = Query("desc"),
+    role_context: Optional[str] = Query(None, description="Role context for role-context-aware dashboards (seller, agent, landlord, investor). Must be one of user's roles."),
     user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db)
 ):
     """
-    Enterprise-grade role-aware property search (GET).
+    Enterprise-grade role-aware property search (GET) with role-context support.
     
     Same filtering rules as GET /api/properties/ but with advanced filters:
     - Public/Guest: Only ACTIVE + public listing types (FOR_SALE, FOR_RENT, FOR_LEASE)
     - Buyer/Tenant: Same as public (marketplace view)
     - Owner roles (Seller/Agent/Landlord/Investor): "My Listings" mode
       * Authenticated owners see ONLY their own properties
-      * Role-specific listing type filtering applied automatically
+      * Role-context-aware listing type filtering:
+        - If role_context provided: Only properties matching that role's listing types
+        - If role_context is None: Properties matching any of user's owner roles (backward compatible)
       * All statuses except DELETED
       * No other users' listings included
     - Admin: All properties (any status, excluding DELETED)
@@ -257,6 +316,40 @@ async def search_properties_get(
             detail=e.errors()
         )
     
+    # Enterprise-grade strictness: Authenticated owner-role users MUST provide role_context
+    owner_roles = ["seller", "agent", "landlord", "investor"]
+    if user and not user.has_role("admin"):
+        if any(user.has_role(role) for role in owner_roles):
+            if not role_context:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"role_context is required for owner-role users. Available roles: {', '.join([r for r in user.roles if r in owner_roles])}. "
+                           f"Please specify role_context parameter (e.g., ?role_context=seller)"
+                )
+    
+    # Validate role_context if provided (same validation logic as main endpoint)
+    validated_role_context = None
+    if role_context:
+        role_context = role_context.lower().strip()
+        valid_owner_roles = ["seller", "agent", "landlord", "investor"]
+        if role_context not in valid_owner_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role_context. Must be one of: {', '.join(valid_owner_roles)}"
+            )
+        if user:
+            if role_context not in user.roles:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"User does not have role '{role_context}'. Available roles: {', '.join(user.roles)}"
+                )
+            validated_role_context = role_context
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="role_context requires authentication"
+            )
+    
     # Enterprise-grade: Use role-aware search
     service = PropertyService(db)
     skip = (filters.page - 1) * filters.limit
@@ -264,7 +357,8 @@ async def search_properties_get(
         user=user,
         filters=filters,
         skip=skip,
-        limit=filters.limit
+        limit=filters.limit,
+        role_context=validated_role_context
     )
     return PropertySearchResponse(
         properties=[PropertyResponse.model_validate(p) for p in properties],
@@ -684,11 +778,12 @@ async def delete_property(
 async def search_properties_post(
     request: Request,
     filters: PropertySearchFilters,
+    role_context: Optional[str] = Query(None, description="Role context for role-context-aware dashboards (seller, agent, landlord, investor). Must be one of user's roles."),
     user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db)
 ):
     """
-    Enterprise-grade role-aware property search (POST).
+    Enterprise-grade role-aware property search (POST) with role-context support.
     
     Same filtering rules as GET /api/properties/search but accepts filters in request body.
     
@@ -697,7 +792,9 @@ async def search_properties_post(
     - Buyer/Tenant: Same as public (marketplace view)
     - Owner roles (Seller/Agent/Landlord/Investor): "My Listings" mode
       * Authenticated owners see ONLY their own properties
-      * Role-specific listing type filtering applied automatically
+      * Role-context-aware listing type filtering:
+        - If role_context provided: Only properties matching that role's listing types
+        - If role_context is None: Properties matching any of user's owner roles (backward compatible)
       * All statuses except DELETED
       * No other users' listings included
     - Admin: All properties (any status, excluding DELETED)
@@ -705,6 +802,40 @@ async def search_properties_post(
     Supports advanced filtering: price, bedrooms, bathrooms, square_feet, location,
     features, year_built, sorting, and pagination.
     """
+    # Enterprise-grade strictness: Authenticated owner-role users MUST provide role_context
+    owner_roles = ["seller", "agent", "landlord", "investor"]
+    if user and not user.has_role("admin"):
+        if any(user.has_role(role) for role in owner_roles):
+            if not role_context:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"role_context is required for owner-role users. Available roles: {', '.join([r for r in user.roles if r in owner_roles])}. "
+                           f"Please specify role_context parameter (e.g., ?role_context=seller)"
+                )
+    
+    # Validate role_context if provided
+    validated_role_context = None
+    if role_context:
+        role_context = role_context.lower().strip()
+        valid_owner_roles = ["seller", "agent", "landlord", "investor"]
+        if role_context not in valid_owner_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role_context. Must be one of: {', '.join(valid_owner_roles)}"
+            )
+        if user:
+            if role_context not in user.roles:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"User does not have role '{role_context}'. Available roles: {', '.join(user.roles)}"
+                )
+            validated_role_context = role_context
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="role_context requires authentication"
+            )
+    
     # Enterprise-grade: Use role-aware search
     service = PropertyService(db)
     skip = (filters.page - 1) * filters.limit
@@ -712,7 +843,8 @@ async def search_properties_post(
         user=user,
         filters=filters,
         skip=skip,
-        limit=filters.limit
+        limit=filters.limit,
+        role_context=validated_role_context
     )
     return PropertySearchResponse(
         properties=[PropertyResponse.model_validate(p) for p in properties],
