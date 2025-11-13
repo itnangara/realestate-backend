@@ -9,7 +9,11 @@ from typing import List, Optional, Tuple
 from app.models.property import Property, PropertyType, PropertyStatus, ListingType
 from app.models.user import User
 from app.schemas.property import PropertyCreate, PropertyUpdate, PropertySearchFilters
-from app.services.property_permissions import PropertyPermissionService, PUBLIC_LISTING_TYPES
+from app.services.property_permissions import (
+    PropertyPermissionService, 
+    PUBLIC_LISTING_TYPES,
+    LISTING_TYPE_CREATE_PERMISSIONS
+)
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -363,7 +367,6 @@ class PropertyService:
         # Role-based visibility filtering
         if not user:
             # Public/Guest: Enterprise-grade granular filtering
-            # BOTH conditions must be satisfied simultaneously:
             # 1. status = ACTIVE (property is publicly listed)
             # 2. listing_type IN [FOR_SALE, FOR_RENT, FOR_LEASE] (only public-facing types)
             # FOR_PORTFOLIO is explicitly excluded - never visible to public
@@ -373,24 +376,38 @@ class PropertyService:
                 Property.listing_type.in_([lt.value for lt in PUBLIC_LISTING_TYPES])  # Explicitly excludes FOR_PORTFOLIO
             )
         elif user.has_role("admin"):
-            # Admin: All properties except DELETED (use /all endpoint to see deleted)
-            query = query.filter(Property.status != PropertyStatus.DELETED)
-        elif user.has_role("buyer") or user.has_role("tenant"):
-            # Buyer/Tenant: Enterprise-grade granular filtering
-            # BOTH conditions must be satisfied simultaneously:
-            # 1. status = ACTIVE (property is publicly listed)
-            # 2. listing_type IN [FOR_SALE, FOR_RENT, FOR_LEASE] (only public-facing types)
-            # FOR_PORTFOLIO is explicitly excluded - never visible to buyer/tenant
-            query = query.filter(
-                Property.status == PropertyStatus.ACTIVE,
-                Property.is_active == True,
-                Property.listing_type.in_([lt.value for lt in PUBLIC_LISTING_TYPES])  # Explicitly excludes FOR_PORTFOLIO
-            )
+            # Admin: Enterprise-grade admin role view support
+            # Mode 1: Admin Management Mode (role_context=None) - All properties except DELETED
+            # Mode 2: Admin in Role View (role_context provided) - Filter by listing type, bypass ownership
+            if role_context:
+                # Admin simulating role view: Filter by listing types for role_context, but NO ownership filter
+                # This allows admin to see all properties of that listing type from all owners
+                # Get listing types for the role_context (admin can use any role_context)
+                valid_owner_roles = ["seller", "agent", "landlord", "investor"]
+                if role_context in valid_owner_roles and role_context in LISTING_TYPE_CREATE_PERMISSIONS:
+                    allowed_listing_types = LISTING_TYPE_CREATE_PERMISSIONS[role_context]
+                    if allowed_listing_types:
+                        query = query.filter(
+                            and_(
+                                Property.status != PropertyStatus.DELETED,  # Exclude deleted
+                                Property.listing_type.in_([lt.value for lt in allowed_listing_types])  # Role-context listing types
+                            )
+                        )
+                    else:
+                        # No listing types for this role - return empty
+                        query = query.filter(Property.id == -1)  # Impossible condition
+                else:
+                    # Invalid role_context - return empty
+                    query = query.filter(Property.id == -1)  # Impossible condition
+            else:
+                # Admin Management Mode: All properties except DELETED (no role_context filtering)
+                query = query.filter(Property.status != PropertyStatus.DELETED)
         else:
-            # Owner roles: "My Listings" mode - ONLY own properties with role-specific listing types
+            # Enterprise-grade: Check owner roles FIRST
+            # This ensures users with owner roles see their own properties (respecting role_context)
+            # rather than all public properties. Users without owner roles fall to marketplace view.
             owner_roles = ["seller", "agent", "landlord", "investor"]
             if any(user.has_role(role) for role in owner_roles):
-                # Enterprise-grade: Authenticated owners see ONLY their own properties
                 # with role-context-aware listing type filtering
                 from app.services.property_permissions import PropertyPermissionService
                 
@@ -414,8 +431,13 @@ class PropertyService:
                     # No allowed listing types for this role context - return empty
                     query = query.filter(Property.id == -1)  # Impossible condition
             else:
-                # Fallback: Public only (same granular filtering as public/guest)
+                # Fallback: Public marketplace view (same as public/guest)
+                # Handles authenticated users with no owner roles:
+                # - Users with buyer/tenant roles only
+                # - Users with no roles
+                # - Users with unrecognized roles
                 # BOTH conditions: status = ACTIVE AND listing_type IN public types
+                # FOR_PORTFOLIO is explicitly excluded - never visible to non-owners
                 query = query.filter(
                     Property.status == PropertyStatus.ACTIVE,
                     Property.is_active == True,

@@ -131,8 +131,9 @@ async def get_properties(
             )
         
         # Validate user has this role (if authenticated)
+        # Exception: Admins can use any role_context for role simulation
         if user:
-            if role_context not in user.roles:
+            if role_context not in user.roles and not user.has_role("admin"):
                 from fastapi import HTTPException, status
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
