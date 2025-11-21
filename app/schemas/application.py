@@ -3,7 +3,7 @@ Application Pydantic schemas for request/response validation
 """
 
 from pydantic import BaseModel, Field, computed_field, model_validator, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from app.models.application import ApplicationStatus
 
@@ -18,11 +18,15 @@ class ApplicationBase(BaseModel):
     employer_name: Optional[str] = Field(None, description="Name of current employer")
     phone: Optional[str] = Field(None, description="Contact phone number")
     alternate_email: Optional[str] = Field(None, description="Alternate email address")
+    references: Optional[List[Dict[str, Any]]] = Field(None, description="List of references (name, phone, email, relationship)")
+    background_check_consent: Optional[bool] = Field(False, description="Consent for background checks")
 
 class ApplicationCreate(ApplicationBase):
     """Schema for creating an application"""
     property_id: int = Field(..., description="ID of the property to apply for")
     documents_urls: Optional[List[str]] = Field(default_factory=list, description="List of document URLs")
+    references: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="List of references")
+    background_check_consent: bool = Field(False, description="Consent for background checks")
 
     @model_validator(mode='after')
     def validate_application_data(self):
@@ -43,17 +47,22 @@ class ApplicationUpdate(BaseModel):
     phone: Optional[str] = Field(None, description="Contact phone number")
     alternate_email: Optional[str] = Field(None, description="Alternate email address")
     documents_urls: Optional[List[str]] = Field(default_factory=list, description="List of document URLs")
+    references: Optional[List[Dict[str, Any]]] = Field(None, description="List of references")
+    background_check_consent: Optional[bool] = Field(None, description="Consent for background checks")
 
 class ApplicationResponse(ApplicationBase):
     """Schema for application response"""
     id: int
     status: ApplicationStatus
     documents_urls: List[str] = Field(default_factory=list)
+    references: Optional[List[Dict[str, Any]]] = None
+    background_check_consent: bool = False
     is_active: bool = True
     applicant_id: int
     property_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    lease_signed_at: Optional[datetime] = Field(None, description="Timestamp when lease was signed")
 
     @computed_field
     @property

@@ -6,9 +6,10 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, tex
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import UUID
 from app.utils.database import Base
+from app.utils.types import UUIDType
 import enum
+import uuid
 
 
 class DocumentType(str, enum.Enum):
@@ -17,6 +18,8 @@ class DocumentType(str, enum.Enum):
     ID_BACK = "id_back"
     PROOF_OF_ADDRESS = "proof_of_address"
     COMPANY_DOC = "company_doc"
+    PROOF_OF_INCOME = "proof_of_income"
+    EMPLOYER_LETTER = "employer_letter"
 
 
 class DocumentStatus(str, enum.Enum):
@@ -37,7 +40,7 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(UUID(as_uuid=True), server_default=text("gen_random_uuid()"), unique=True, nullable=False, index=True)
+    file_id = Column(UUIDType(as_uuid=True), default=uuid.uuid4, unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Document metadata

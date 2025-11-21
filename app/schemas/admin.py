@@ -53,3 +53,6 @@ class RoleRequestRejectRequest(BaseModel):
     """Request schema for rejecting a role request"""
     reason: Optional[str] = Field(None, max_length=1000, description="Optional rejection reason")
 
+
+
+

@@ -16,6 +16,8 @@ class ApplicationStatus(str, enum.Enum):
     REJECTED = "rejected"
     WITHDRAWN = "withdrawn"
     UNDER_REVIEW = "under_review"
+    SIGNED = "signed"  # Contract agreed but move-in hasn't happened yet
+    ACTIVE_LEASE = "active_lease"  # Move-in confirmed, lease is now live
 
 class Application(Base):
     """Application model"""
@@ -43,11 +45,18 @@ class Application(Base):
 
     # Documents
     documents_urls = Column(JSON, nullable=False, default=list)
+    
+    # References and consent
+    references = Column(JSON, nullable=True)  # Array of references (name, phone, email, relationship)
+    background_check_consent = Column(Boolean, default=False, nullable=False)
 
     # Metadata
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Lease tracking
+    lease_signed_at = Column(DateTime(timezone=True), nullable=True, index=True)  # Timestamp when lease was signed
 
     # Foreign keys
     applicant_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)

@@ -114,6 +114,25 @@ class RoleGrantingService:
                 role_request.reviewed_at = datetime.utcnow()
                 self.db.commit()
         
+        # Auto-create TenantProfile if tenant role was granted
+        if "tenant" in granted_roles:
+            from app.models.tenant_profile import TenantProfile
+            existing_profile = self.db.query(TenantProfile).filter(
+                TenantProfile.user_id == user_id
+            ).first()
+            
+            if not existing_profile:
+                tenant_profile = TenantProfile(user_id=user_id)
+                self.db.add(tenant_profile)
+                self.db.commit()
+                self.db.refresh(tenant_profile)
+                
+                logger.info(
+                    "tenant_profile_auto_created",
+                    user_id=user_id,
+                    profile_id=tenant_profile.id
+                )
+        
         # Audit log
         actor_id = granted_by if granted_by else None
         action = "role_granted" if granted_by else "role_auto_granted"
