@@ -77,6 +77,7 @@ async def list_role_requests(
     document_service = DocumentService(db)
     
     # Get role requests with filters
+    # Note: role_filter is handled in the service with Python-side filtering
     requests = role_request_service.get_role_requests_with_documents(
         status_filter=status_filter,
         user_id_filter=user_id,
@@ -88,18 +89,24 @@ async def list_role_requests(
     )
     
     # Get total count for pagination
+    # Enterprise-grade: Apply role filter in Python for database-agnostic compatibility
     query = db.query(RoleRequest)
     if status_filter:
         query = query.filter(RoleRequest.status == status_filter)
     if user_id:
         query = query.filter(RoleRequest.user_id == user_id)
-    if role:
-        query = query.filter(RoleRequest.requested_roles.contains([role]))
     if date_from:
         query = query.filter(RoleRequest.requested_at >= date_from)
     if date_to:
         query = query.filter(RoleRequest.requested_at <= date_to)
-    total = query.count()
+    
+    # Apply role filter in Python (database-agnostic)
+    if role:
+        all_for_count = query.all()
+        filtered = [req for req in all_for_count if role in (req.requested_roles or [])]
+        total = len(filtered)
+    else:
+        total = query.count()
     
     # Build response with document attachments
     requests_with_docs = []

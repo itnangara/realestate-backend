@@ -7,10 +7,12 @@ that need to work with SQLite for testing.
 Types:
 - ArrayType: PostgreSQL ARRAY that works as JSON in SQLite
 - JSONBType: PostgreSQL JSONB that works as JSON in SQLite
+- UUIDType: PostgreSQL UUID that works as String in SQLite
 """
 
 import json
 from typing import Any, List, Optional, Type
+from uuid import UUID as PythonUUID
 from sqlalchemy import TypeDecorator, String, Text
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.types import TypeEngine
@@ -231,4 +233,134 @@ class JSONBType(TypeDecorator):
         if x is None or y is None:
             return False
         return x == y
+
+
+class UUIDType(TypeDecorator):
+    """
+    Enterprise-grade UUID type that works with both PostgreSQL and SQLite.
+    
+    In PostgreSQL: Uses native UUID type for optimal performance
+    In SQLite: Uses String(36) storage with automatic serialization/deserialization
+    
+    Usage:
+        file_id = Column(UUIDType(as_uuid=True), nullable=False)
+    """
+    
+    impl = String
+    cache_ok = True
+    
+    def __init__(self, as_uuid: bool = True, **kwargs):
+        """
+        Initialize UUIDType
+        
+        Args:
+            as_uuid: If True, work with Python UUID objects. If False, work with strings.
+            **kwargs: Additional arguments passed to TypeDecorator
+        """
+        super().__init__(**kwargs)
+        self.as_uuid = as_uuid
+        # Store PostgreSQL UUID type for dialect-specific behavior
+        self._postgresql_uuid = postgresql.UUID(as_uuid=as_uuid)
+    
+    def load_dialect_impl(self, dialect):
+        """
+        Return the appropriate type implementation based on database dialect.
+        
+        Args:
+            dialect: SQLAlchemy dialect object
+            
+        Returns:
+            TypeEngine appropriate for the dialect
+        """
+        if dialect.name == 'postgresql':
+            # Use native PostgreSQL UUID for production
+            return self._postgresql_uuid
+        else:
+            # Use String(36) for SQLite and other databases (UUID string format)
+            return dialect.type_descriptor(String(36))
+    
+    def process_bind_param(self, value: Optional[Any], dialect) -> Optional[str]:
+        """
+        Convert Python UUID to database value.
+        
+        Args:
+            value: Python UUID object or UUID string or None
+            dialect: SQLAlchemy dialect object
+            
+        Returns:
+            UUID for PostgreSQL, string for SQLite, None if value is None
+        """
+        if value is None:
+            return None
+        
+        if dialect.name == 'postgresql':
+            # PostgreSQL handles UUID natively
+            return value
+        else:
+            # SQLite: convert UUID to string
+            if isinstance(value, PythonUUID):
+                return str(value)
+            elif isinstance(value, str):
+                # Validate it's a valid UUID string
+                try:
+                    PythonUUID(value)
+                    return value
+                except ValueError:
+                    raise ValueError(f"Invalid UUID string: {value}")
+            else:
+                raise ValueError(f"UUIDType expects UUID or string, got {type(value)}")
+    
+    def process_result_value(self, value: Optional[Any], dialect) -> Optional[Any]:
+        """
+        Convert database value to Python UUID.
+        
+        Args:
+            value: Database value (UUID for PostgreSQL, string for SQLite)
+            dialect: SQLAlchemy dialect object
+            
+        Returns:
+            Python UUID object if as_uuid=True, string if as_uuid=False, None if value is None
+        """
+        if value is None:
+            return None
+        
+        if dialect.name == 'postgresql':
+            # PostgreSQL returns native UUID
+            return value
+        else:
+            # SQLite: convert string to UUID
+            if isinstance(value, str):
+                if self.as_uuid:
+                    try:
+                        return PythonUUID(value)
+                    except ValueError:
+                        raise ValueError(f"Invalid UUID string from database: {value}")
+                else:
+                    return value
+            elif isinstance(value, PythonUUID):
+                # Already a UUID (shouldn't happen in SQLite, but handle gracefully)
+                return value if self.as_uuid else str(value)
+            else:
+                raise ValueError(f"Unexpected UUIDType value type: {type(value)}")
+    
+    def compare_values(self, x: Optional[Any], y: Optional[Any]) -> bool:
+        """
+        Compare two UUID values for equality.
+        
+        Args:
+            x: First UUID value
+            y: Second UUID value
+            
+        Returns:
+            True if UUIDs are equal, False otherwise
+        """
+        if x is None and y is None:
+            return True
+        if x is None or y is None:
+            return False
+        
+        # Normalize to strings for comparison
+        x_str = str(x) if isinstance(x, PythonUUID) else x
+        y_str = str(y) if isinstance(y, PythonUUID) else y
+        return x_str == y_str
 

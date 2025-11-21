@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from decouple import config
 import os
-from app.routes import auth, properties, users, applications, favorites, seller, role_routes, documents, webhooks, admin
+from app.routes import auth, properties, users, applications, favorites, seller, role_routes, documents, webhooks, admin, tenant
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
 from app.core.limiter import limiter, init_limiter
@@ -201,13 +201,76 @@ def add_cors_headers(response: JSONResponse, request: Request) -> JSONResponse:
     return response
 
 
+# Enterprise-grade user-friendly error message translation
+def get_user_friendly_error_message(field_name: str, error_type: str, error_msg: str, field_path: list) -> str:
+    """
+    Translate technical validation errors into user-friendly messages.
+    
+    Industry standard: Users see helpful messages, not technical jargon.
+    """
+    # Field name mapping for better UX
+    field_display_names = {
+        "employment_status": "Employment Status",
+        "employer_name": "Employer Name",
+        "job_title": "Job Title",
+        "annual_income": "Annual Income",
+        "monthly_income": "Monthly Income",
+        "credit_score": "Credit Score",
+        "bank_name": "Bank Name",
+        "bank_account_type": "Bank Account Type",
+        "previous_landlord_name": "Previous Landlord Name",
+        "previous_landlord_phone": "Previous Landlord Phone",
+        "previous_rent_amount": "Previous Rent Amount",
+        "rental_history_years": "Rental History (Years)",
+        "preferred_lease_duration": "Preferred Lease Duration",
+        "max_rent_budget": "Maximum Rent Budget",
+        "document_ids": "Documents",
+    }
+    
+    display_name = field_display_names.get(field_name, field_name.replace("_", " ").title())
+    
+    # Error type to user-friendly message mapping
+    if error_type == "missing":
+        return f"{display_name} is required"
+    elif error_type == "value_error.missing":
+        return f"{display_name} is required"
+    elif error_type == "type_error.none.not_allowed":
+        return f"{display_name} is required"
+    elif error_type == "value_error.number.not_gt":
+        if "income" in field_name.lower():
+            return f"{display_name} must be greater than 0"
+        return f"{display_name} must be a positive number"
+    elif error_type == "value_error.number.not_ge":
+        if "credit_score" in field_name.lower():
+            return f"{display_name} must be between 300 and 850"
+        return f"{display_name} must be greater than or equal to 0"
+    elif error_type == "value_error.str.regex":
+        return f"{display_name} format is invalid"
+    elif error_type == "value_error.any_str.max_length":
+        max_length = error_msg.split("at most")[-1].strip() if "at most" in error_msg else ""
+        return f"{display_name} is too long (maximum {max_length} characters)"
+    elif error_type == "value_error.any_str.min_length":
+        min_length = error_msg.split("at least")[-1].strip() if "at least" in error_msg else ""
+        return f"{display_name} is too short (minimum {min_length} characters)"
+    elif "greater than" in error_msg.lower() or "ge=" in error_msg.lower():
+        return f"{display_name} must be a valid positive number"
+    elif "less than" in error_msg.lower() or "le=" in error_msg.lower():
+        return f"{display_name} value is too large"
+    elif "invalid" in error_msg.lower():
+        return f"{display_name} is invalid"
+    else:
+        # Fallback: capitalize and clean up the original message
+        return f"{display_name}: {error_msg.capitalize()}"
+
+
 # Validation error exception handler (422)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
     Enterprise-grade validation error handler.
     
-    Returns structured validation errors that are easy for frontend to parse and display.
+    Returns structured, user-friendly validation errors that frontend can display
+    in a persistent, helpful way (toasts, inline field errors, etc.).
     """
     request_id = getattr(request.state, "request_id", "unknown")
     client_host = request.client.host if request.client else "unknown"
@@ -216,23 +279,33 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     errors = exc.errors()
     field_errors = []
     error_messages = []
+    primary_message = None
     
     for error in errors:
         # Get field name (last item in location path)
         field_path = error.get("loc", [])
         field_name = field_path[-1] if field_path else "unknown"
         
-        # Get error message
+        # Get error message and type
         error_msg = error.get("msg", "Validation error")
         error_type = error.get("type", "validation_error")
         
+        # Translate to user-friendly message
+        user_friendly_msg = get_user_friendly_error_message(field_name, error_type, error_msg, list(field_path))
+        
         field_errors.append({
             "field": field_name,
-            "message": error_msg,
+            "message": user_friendly_msg,
             "type": error_type,
             "path": list(field_path)  # Full path for nested fields
         })
-        error_messages.append(f"{field_name}: {error_msg}")
+        error_messages.append(user_friendly_msg)
+    
+    # Generate primary message (first error or summary)
+    if field_errors:
+        primary_message = field_errors[0]["message"]
+        if len(field_errors) > 1:
+            primary_message = f"{primary_message} and {len(field_errors) - 1} other error(s)"
     
     # Log validation errors with structured logging
     logger.warning(
@@ -247,14 +320,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
     
     # Return structured error response with CORS headers
+    # Industry standard format: error, message, field-level errors
     response = JSONResponse(
         status_code=422,
         content={
             "error": "ValidationError",
-            "message": "Request validation failed",
+            "message": primary_message or "Please check the form and try again",
             "fields": [e["field"] for e in field_errors],  # Simple list for quick access
-            "errors": field_errors,  # Detailed errors with full context
-            "summary": "; ".join(error_messages),  # Human-readable summary
+            "errors": field_errors,  # Detailed errors with full context for field-level display
+            "summary": "; ".join(error_messages),  # Human-readable summary for toast/banner
         },
         headers={"X-Request-ID": request_id}
     )
@@ -287,12 +361,28 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 # Global HTTP exception handler (for 4xx and 5xx errors)
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handle HTTP exceptions with CORS headers"""
+    """
+    Handle HTTP exceptions with CORS headers.
+    
+    Supports both simple string details and structured error objects.
+    """
     request_id = getattr(request.state, "request_id", "unknown")
+    
+    # If detail is already a structured dict (from our custom validations), use it directly
+    # Otherwise, wrap it in the standard format
+    if isinstance(exc.detail, dict):
+        content = exc.detail
+    else:
+        # Simple string detail - convert to structured format
+        content = {
+            "error": "HTTPException",
+            "message": str(exc.detail),
+            "status_code": exc.status_code
+        }
     
     response = JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
+        content=content,
         headers={"X-Request-ID": request_id}
     )
     return add_cors_headers(response, request)
@@ -342,6 +432,7 @@ app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(tenant.router, prefix="/api", tags=["Tenant"])
 
 # Setup monitoring and metrics
 setup_metrics(app)

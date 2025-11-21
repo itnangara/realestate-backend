@@ -2,7 +2,7 @@
 Property Pydantic schemas for request/response validation
 """
 
-from pydantic import BaseModel, validator, root_validator, ConfigDict, Field, conint, confloat, model_validator
+from pydantic import BaseModel, validator, root_validator, ConfigDict, Field, conint, confloat, model_validator, computed_field
 from typing import Optional, List
 from datetime import datetime
 from app.models.property import PropertyType, PropertyStatus, ListingType
@@ -86,6 +86,24 @@ class PropertyResponse(PropertyBase):
     has_pool: bool = False
     has_garden: bool = False
     has_balcony: bool = False
+    
+    @computed_field
+    @property
+    def display_price(self) -> Optional[float]:
+        """
+        Enterprise-grade computed field: Automatically selects the correct price based on listing_type.
+        
+        Rules:
+        - FOR_RENT, FOR_LEASE → returns rent_price (monthly rent)
+        - FOR_SALE, FOR_AUCTION, FOR_PORTFOLIO → returns price (sale price)
+        - None/unknown listing_type → returns price as fallback
+        
+        This ensures single source of truth and eliminates frontend conditional logic.
+        """
+        if self.listing_type in [ListingType.FOR_RENT, ListingType.FOR_LEASE]:
+            return self.rent_price
+        # FOR_SALE, FOR_AUCTION, FOR_PORTFOLIO, or None → use sale price
+        return self.price
 
     model_config = ConfigDict(from_attributes=True)
 

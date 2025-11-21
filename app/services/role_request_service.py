@@ -357,18 +357,24 @@ class RoleRequestService:
         if user_id_filter:
             query = query.filter(RoleRequest.user_id == user_id_filter)
         
-        if role_filter:
-            # Filter by role in requested_roles array
-            # For PostgreSQL ARRAY, use contains; for SQLite JSON, filter in Python
-            query = query.filter(RoleRequest.requested_roles.contains([role_filter]))
-        
         if date_from:
             query = query.filter(RoleRequest.requested_at >= date_from)
         
         if date_to:
             query = query.filter(RoleRequest.requested_at <= date_to)
         
-        results = query.order_by(RoleRequest.requested_at.desc()).offset(offset).limit(limit).all()
+        # Enterprise-grade: Database-agnostic array filtering
+        # Apply role filter in Python to avoid PostgreSQL array operator compatibility issues
+        # This works for both PostgreSQL (ARRAY) and SQLite (JSON)
+        results = query.order_by(RoleRequest.requested_at.desc()).all()
+        
+        if role_filter:
+            results = [req for req in results if role_filter in (req.requested_roles or [])]
+        
+        # Apply pagination after filtering
+        total = len(results)
+        results = results[offset:offset + limit]
+        
         return results if results is not None else []
     
     async def check_kyc_required(

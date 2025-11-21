@@ -85,35 +85,34 @@ class PropertyPermissionService:
         if property.status == PropertyStatus.DELETED:
             return False
         
-        # Public/Guest/Buyer/Tenant: Only ACTIVE + public listing types
+        # Public access check: ACTIVE + public listing types
         # Enterprise-grade: BOTH conditions must be satisfied simultaneously:
         # 1. status = ACTIVE (property is publicly listed)
         # 2. listing_type IN [FOR_SALE, FOR_RENT, FOR_LEASE] (only public-facing types)
-        # FOR_PORTFOLIO is explicitly excluded - never visible to public/buyer/tenant
-        if not user or user.has_role("buyer") or user.has_role("tenant"):
-            return (
-                property.status == PropertyStatus.ACTIVE
-                and property.is_active
-                and property.listing_type in PUBLIC_LISTING_TYPES  # Explicitly excludes FOR_PORTFOLIO
-            )
+        # FOR_PORTFOLIO is explicitly excluded - never visible to public
+        is_public_listing = (
+            property.status == PropertyStatus.ACTIVE
+            and property.is_active
+            and property.listing_type in PUBLIC_LISTING_TYPES
+        )
         
-        # Owner roles: ACTIVE + their own properties (any status)
+        # Public/Guest/Buyer/Tenant: Can view public listings
+        # Includes authenticated users with no roles (treat as public)
+        if not user or not user.roles or user.has_role("buyer") or user.has_role("tenant"):
+            return is_public_listing
+        
+        # Owner roles: Can view their own properties (any status) OR public listings
         owner_roles = ["seller", "agent", "landlord", "investor"]
         if any(user.has_role(role) for role in owner_roles):
-            # Enterprise-grade ownership check: Explicit ownership verification
+            # Own property: can see any status (except DELETED, which is filtered above)
             if property.owner_id == user.id:
-                # Own property: can see any status (except DELETED, which is filtered above)
                 return True
-            # Not own property: must satisfy BOTH conditions:
-            # 1. status = ACTIVE
-            # 2. listing_type IN [FOR_SALE, FOR_RENT, FOR_LEASE] (explicitly excludes FOR_PORTFOLIO)
-            return (
-                property.status == PropertyStatus.ACTIVE
-                and property.is_active
-                and property.listing_type in PUBLIC_LISTING_TYPES  # Explicitly excludes FOR_PORTFOLIO
-            )
+            # Not own property: can view public listings
+            return is_public_listing
         
-        return False
+        # Fallback: Any authenticated user can view public listings
+        # This ensures users with unrecognized roles can still browse public marketplace
+        return is_public_listing
     
     @staticmethod
     def can_update_property(user: User, property: Property) -> bool:
