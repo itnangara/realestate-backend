@@ -2,7 +2,7 @@
 Schemas for Role and UserRole
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 
 
@@ -18,15 +18,13 @@ class RoleCreate(RoleBase):
 class RoleResponse(RoleBase):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserRoleResponse(BaseModel):
     role: RoleResponse
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RoleListResponse(BaseModel):
@@ -35,5 +33,4 @@ class RoleListResponse(BaseModel):
     name: str
     description: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

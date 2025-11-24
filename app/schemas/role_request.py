@@ -2,7 +2,7 @@
 Role Request schemas for API requests and responses
 """
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from typing import List, Optional, Any
 from datetime import datetime
 from uuid import UUID
@@ -11,7 +11,7 @@ from app.models.role_request import RoleRequestStatus
 
 class RoleRequestCreate(BaseModel):
     """Request schema for creating a role request"""
-    requested_roles: List[str] = Field(..., min_items=1, description="List of roles to request")
+    requested_roles: List[str] = Field(..., min_length=1, description="List of roles to request")
     document_ids: Optional[List[UUID]] = Field(default=None, description="List of document file UUIDs to attach")
     notes: Optional[str] = Field(default=None, max_length=1000, description="Optional notes for the request")
     
@@ -56,8 +56,7 @@ class RoleRequestResponse(BaseModel):
                     data['attachments'] = None
         return data
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RoleRequestListResponse(BaseModel):

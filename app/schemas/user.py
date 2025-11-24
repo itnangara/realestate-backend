@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import List, Optional, Literal
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from datetime import datetime
 from app.models.user import UserRoles
 
@@ -81,12 +81,13 @@ class UserRolesUpdate(BaseModel):
                 raise ValueError(f'Invalid role: {role}. Allowed roles: {allowed_roles}')
         return v
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "roles": ["buyer", "seller", "investor"]
             }
         }
+    )
 
 
 class UserOut(BaseModel):

@@ -4,7 +4,7 @@ Admin schemas for role request management
 Enterprise-grade schemas for admin endpoints with document details and URLs.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 from uuid import UUID
@@ -22,8 +22,7 @@ class DocumentAttachmentResponse(BaseModel):
     status: str = Field(..., description="Document status")
     uploaded_at: datetime = Field(..., description="Upload timestamp")
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdminRoleRequestResponse(BaseModel):
@@ -39,8 +38,7 @@ class AdminRoleRequestResponse(BaseModel):
     attachments: List[DocumentAttachmentResponse] = Field(default_factory=list, description="List of attached documents with URLs")
     trust_score: float
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdminRoleRequestListResponse(BaseModel):
