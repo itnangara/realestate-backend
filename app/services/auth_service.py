@@ -54,14 +54,36 @@ class AuthService:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             email: str = payload.get("sub")
             if email is None:
-                raise JWTError("Invalid token")
+                raise JWTError("Invalid token: missing 'sub' claim")
             return email
-        except JWTError as e:
-            # Re-raise as HTTPException for FastAPI to handle properly
+        except jwt.ExpiredSignatureError:
             from fastapi import HTTPException, status
+            from app.core.logger import get_logger
+            logger = get_logger(__name__)
+            logger.warning(
+                "token_expired",
+                message="JWT token has expired"
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
+                detail="Token has expired. Please refresh your token or login again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        except JWTError as e:
+            # Log the actual error for debugging (but don't expose to client)
+            from fastapi import HTTPException, status
+            from app.core.logger import get_logger
+            logger = get_logger(__name__)
+            logger.warning(
+                "jwt_validation_failed",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                message="JWT token validation failed"
+            )
+            # Re-raise as HTTPException for FastAPI to handle properly
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials. Please login again.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
     
