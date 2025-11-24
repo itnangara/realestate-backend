@@ -54,24 +54,29 @@ def upgrade() -> None:
 def downgrade() -> None:
     """
     Remove all indexes added in upgrade().
+    Enterprise-grade: Checks if indexes exist before dropping to handle inconsistent states.
     """
+    from sqlalchemy import inspect
     
-    # Drop B-Tree indexes
-    op.drop_index("idx_property_price", "properties")
-    op.drop_index("idx_property_type", "properties")
-    op.drop_index("idx_property_bedrooms", "properties")
-    op.drop_index("idx_property_bathrooms", "properties")
-    op.drop_index("idx_property_status", "properties")
-    op.drop_index("idx_property_created_at", "properties")
-    op.drop_index("idx_property_is_featured", "properties")
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    indexes = [idx['name'] for idx in inspector.get_indexes('properties')]
     
-    # Drop composite indexes
-    op.drop_index("idx_property_city_state", "properties")
-    op.drop_index("idx_property_city_state_zip", "properties")
+    # Drop B-Tree indexes if they exist
+    index_names = [
+        "idx_property_price",
+        "idx_property_type",
+        "idx_property_bedrooms",
+        "idx_property_bathrooms",
+        "idx_property_status",
+        "idx_property_created_at",
+        "idx_property_is_featured",
+        "idx_property_city_state",
+        "idx_property_city_state_zip",
+        "idx_property_square_feet",
+        "idx_property_year_built"
+    ]
     
-    # Note: JSON features index was not created, so no need to drop it
-    # op.drop_index("idx_property_features", "properties")
-    
-    # Drop additional indexes
-    op.drop_index("idx_property_square_feet", "properties")
-    op.drop_index("idx_property_year_built", "properties")
+    for index_name in index_names:
+        if index_name in indexes:
+            op.drop_index(index_name, "properties")

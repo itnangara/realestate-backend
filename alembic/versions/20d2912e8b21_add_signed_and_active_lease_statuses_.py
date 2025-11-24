@@ -24,9 +24,19 @@ def upgrade() -> None:
     
     Enterprise-grade migration:
     - ApplicationStatus uses native_enum=False (stored as string), so new values work automatically
+    - Increase VARCHAR length from 12 to 20 to accommodate "active_lease" (12 chars) and future values
     - Add lease_signed_at column for lease tracking
     - No enum migration needed since status is stored as VARCHAR
     """
+    # Increase VARCHAR length to accommodate "active_lease" and future status values
+    op.alter_column(
+        'applications',
+        'status',
+        type_=sa.String(length=20),
+        existing_type=sa.String(length=12),
+        existing_nullable=False
+    )
+    
     # Add lease_signed_at column
     op.add_column(
         'applications',
