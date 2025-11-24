@@ -126,7 +126,8 @@ def test_user_buyer(db_session, auth_service, test_roles):
         username="buyer_user",
         first_name="Test",
         last_name="Buyer",
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
+        is_verified=True
     )
     db_session.add(user)
     db_session.commit()
@@ -151,7 +152,8 @@ def test_user_admin(db_session, auth_service, test_roles):
         username="admin_user",
         first_name="Test",
         last_name="Admin",
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
+        is_verified=True
     )
     db_session.add(user)
     db_session.commit()
@@ -176,7 +178,8 @@ def test_user_agent(db_session, auth_service, test_roles):
         username="agent_user",
         first_name="Test",
         last_name="Agent",
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
+        is_verified=True
     )
     db_session.add(user)
     db_session.commit()
