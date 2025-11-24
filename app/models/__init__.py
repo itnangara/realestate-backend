@@ -20,6 +20,7 @@ from .document import Document, DocumentType, DocumentStatus
 from .audit_log import AuditLog
 from .user_limit import UserLimit
 from .email_verification_token import EmailVerificationToken
+from .lease import Lease, LeaseSignature, LeaseStatus
 
 __all__ = [
     "User",
@@ -48,7 +49,11 @@ __all__ = [
     "DocumentStatus",
     "AuditLog",
     "UserLimit",
-    "EmailVerificationToken"
+    "EmailVerificationToken",
+    "Lease",
+    "LeaseSignature",
+    "LeaseStatus"
 ]
+
 
 

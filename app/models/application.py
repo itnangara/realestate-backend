@@ -7,17 +7,26 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
 from app.utils.database import Base
+from datetime import datetime, timezone
 import enum
 
 class ApplicationStatus(str, enum.Enum):
-    """Application status enum"""
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    WITHDRAWN = "withdrawn"
-    UNDER_REVIEW = "under_review"
+    """Application status enum - clean modern workflow following industry standards
+    
+    Core flow: draft → submitted → reviewed → (approved | rejected | needs_info)
+    Lease flow: approved → signed → active_lease → closed
+    Withdrawal: any status → withdrawn
+    """
+    DRAFT = "draft"  # Tenant is still filling out the application
+    SUBMITTED = "submitted"  # Tenant submitted, waiting for landlord to review (covers: pending, under_review, awaiting_decision, in_queue)
+    REVIEWED = "reviewed"  # System moved to reviewed, landlord can now approve/reject
+    APPROVED = "approved"  # Landlord approved the application
+    REJECTED = "rejected"  # Landlord rejected the application
+    NEEDS_INFO = "needs_info"  # Landlord requested more information
+    WITHDRAWN = "withdrawn"  # Tenant or system withdrew the application
     SIGNED = "signed"  # Contract agreed but move-in hasn't happened yet
     ACTIVE_LEASE = "active_lease"  # Move-in confirmed, lease is now live
+    CLOSED = "closed"  # Lease terminated/completed
 
 class Application(Base):
     """Application model"""
@@ -26,7 +35,7 @@ class Application(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # Status
-    status = Column(Enum(ApplicationStatus, native_enum=False), default=ApplicationStatus.PENDING, nullable=False)
+    status = Column(Enum(ApplicationStatus, native_enum=False), default=ApplicationStatus.DRAFT, nullable=False)
 
     # Application details
     message = Column(Text, nullable=True)
@@ -52,8 +61,8 @@ class Application(Base):
 
     # Metadata
     is_active = Column(Boolean, default=True, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
     
     # Lease tracking
     lease_signed_at = Column(DateTime(timezone=True), nullable=True, index=True)  # Timestamp when lease was signed
@@ -74,3 +83,4 @@ class Application(Base):
 
     def __repr__(self):
         return f"<Application(id={self.id}, status='{self.status}', property_id={self.property_id})>"
+

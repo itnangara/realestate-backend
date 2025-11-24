@@ -2,7 +2,7 @@
 Document schemas for API requests and responses
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
@@ -48,7 +48,7 @@ class DocumentUploadResponse(BaseModel):
 
 class DocumentUploadRequestMulti(BaseModel):
     """Request schema for uploading multiple documents"""
-    files: List[DocumentUploadRequest] = Field(..., min_items=1, max_items=10, description="List of files to upload")
+    files: List[DocumentUploadRequest] = Field(..., min_length=1, max_length=10, description="List of files to upload")
 
 
 class DocumentResponse(BaseModel):
@@ -65,8 +65,7 @@ class DocumentResponse(BaseModel):
     uploaded_at: datetime
     signed_url: Optional[str] = Field(None, description="Presigned URL for accessing the document")
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DocumentDownloadResponse(BaseModel):

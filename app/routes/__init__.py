@@ -2,8 +2,9 @@
 Routes package initialization
 """
 
-from . import auth, properties, users, applications, documents, webhooks, admin
+from . import auth, properties, users, documents, webhooks, admin, tenant, landlord
 
-__all__ = ["auth", "properties", "users", "applications", "documents", "webhooks", "admin"]
+__all__ = ["auth", "properties", "users", "documents", "webhooks", "admin", "tenant", "landlord"]
+
 
 

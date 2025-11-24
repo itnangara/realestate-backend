@@ -120,38 +120,6 @@ async def confirm_document_upload(
     return DocumentResponse.model_validate(document)
 
 
-@router.get(
-    "/{document_id}",
-    response_model=DocumentDownloadResponse,
-    summary="Get document download URL",
-    response_description="Presigned GET URL for downloading the document from S3"
-)
-async def get_document_download_url(
-    document_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    request: Request = None
-):
-    """
-    Generate a presigned GET URL for downloading a document.
-    
-    Security: Validates document ownership (user_id check) before generating URL.
-    
-    The URL is valid for 1 hour and provides direct access to the document
-    stored in S3. All download requests are logged in the audit trail.
-    """
-    request_id = getattr(request.state, 'request_id', None)
-    
-    service = DocumentService(db)
-    result = await service.get_download_url(
-        document_id=document_id,
-        user_id=current_user.id,
-        request_id=request_id
-    )
-    
-    return DocumentDownloadResponse(**result)
-
-
 @router.post(
     "/upload",
     response_model=List[DocumentUploadResponse],
@@ -273,6 +241,38 @@ async def get_my_documents(
         documents=document_responses,
         total=len(document_responses)
     )
+
+
+@router.get(
+    "/{document_id}",
+    response_model=DocumentDownloadResponse,
+    summary="Get document download URL",
+    response_description="Presigned GET URL for downloading the document from S3"
+)
+async def get_document_download_url(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """
+    Generate a presigned GET URL for downloading a document.
+    
+    Security: Validates document ownership (user_id check) before generating URL.
+    
+    The URL is valid for 1 hour and provides direct access to the document
+    stored in S3. All download requests are logged in the audit trail.
+    """
+    request_id = getattr(request.state, 'request_id', None)
+    
+    service = DocumentService(db)
+    result = await service.get_download_url(
+        document_id=document_id,
+        user_id=current_user.id,
+        request_id=request_id
+    )
+    
+    return DocumentDownloadResponse(**result)
 
 
 @router.get(

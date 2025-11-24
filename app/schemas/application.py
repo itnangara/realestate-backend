@@ -76,3 +76,23 @@ class ApplicationDetailResponse(ApplicationResponse):
     """Schema for application with related data"""
     applicant: Optional[dict] = Field(None, description="Applicant user information")
     property: Optional[dict] = Field(None, description="Property information")
+
+
+class ApplicationListResponse(BaseModel):
+    """
+    Enterprise-grade paginated response for application lists.
+    
+    Standardized format matching industry best practices:
+    - items: List of applications (always an array, never null)
+    - total: Total count matching filters (not total DB rows)
+    - page: Current page number (1-indexed)
+    - limit: Items per page
+    - pages: Total number of pages
+    """
+    items: List[ApplicationResponse] = Field(default_factory=list, description="List of applications")
+    total: int = Field(ge=0, description="Total count matching filters")
+    page: int = Field(ge=1, description="Current page number (1-indexed)")
+    limit: int = Field(ge=1, description="Items per page")
+    pages: int = Field(ge=0, description="Total number of pages")
+    
+    model_config = ConfigDict(from_attributes=True)
