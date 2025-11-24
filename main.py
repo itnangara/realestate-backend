@@ -5,6 +5,7 @@ Main application entry point
 
 import uuid
 import time
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from decouple import config
 import os
-from app.routes import auth, properties, users, applications, favorites, seller, role_routes, documents, webhooks, admin, tenant
+from app.routes import auth, properties, users, favorites, seller, role_routes, documents, webhooks, admin, tenant, landlord
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
 from app.core.limiter import limiter, init_limiter
@@ -30,13 +31,28 @@ logger = get_logger(__name__)
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-# Initialize FastAPI app
+
+# Lifespan context manager for startup/shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
+    # Startup
+    logger.info("application_starting", version="1.0.0")
+    await init_cache()
+    logger.info("application_started", version="1.0.0")
+    yield
+    # Shutdown (if needed in future)
+    # logger.info("application_shutting_down")
+
+
+# Initialize FastAPI app with lifespan
 app = FastAPI(
     title="Real Estate API",
     description="A comprehensive real estate management API",
     version="1.0.0",
     docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    redoc_url="/api/redoc",
+    lifespan=lifespan
 )
 
 # CORS middleware - get allowed origins from environment
@@ -307,7 +323,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         if len(field_errors) > 1:
             primary_message = f"{primary_message} and {len(field_errors) - 1} other error(s)"
     
-    # Log validation errors with structured logging
+    # Log validation errors with structured logging - include detailed error messages
+    # Also print to console for immediate visibility
+    error_summary = "; ".join(error_messages)
+    print(f"\n❌ VALIDATION ERROR on {request.method} {request.url.path}")
+    print(f"   Fields with errors: {', '.join([e['field'] for e in field_errors])}")
+    print(f"   Summary: {error_summary}")
+    for i, err in enumerate(field_errors, 1):
+        print(f"   {i}. {err['field']}: {err['message']} (type: {err['type']})")
+    print()
+    
     logger.warning(
         event="validation_error",
         request_id=request_id,
@@ -317,6 +342,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         field_count=len(field_errors),
         fields=[e["field"] for e in field_errors],
         error_types=[e["type"] for e in field_errors],
+        error_messages=[e["message"] for e in field_errors],
+        error_summary=error_summary,
+        validation_details=field_errors,  # Full error details for debugging
+        raw_pydantic_errors=errors,  # Raw Pydantic errors with input values
     )
     
     # Return structured error response with CORS headers
@@ -425,7 +454,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(properties.router, prefix="/api/properties", tags=["Properties"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
-app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
+# Applications router removed - all endpoints moved to role-scoped routes:
+# - /api/tenant/applications/* (tenant routes)
+# - /api/landlord/applications/* (landlord routes)
+# - /api/admin/applications/* (admin routes)
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(seller.router, prefix="/api/sellers", tags=["Sellers"])
 app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
@@ -433,16 +465,13 @@ app.include_router(documents.router, prefix="/api/documents", tags=["Documents"]
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(tenant.router, prefix="/api", tags=["Tenant"])
+app.include_router(landlord.router, prefix="/api", tags=["Landlord"])
+from app.routes import lease, lease_sse
+app.include_router(lease.router, prefix="/api", tags=["Leases"])
+app.include_router(lease_sse.router, prefix="/api", tags=["Leases", "SSE"])
 
 # Setup monitoring and metrics
 setup_metrics(app)
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize cache and log startup"""
-    logger.info("application_starting", version="1.0.0")
-    await init_cache()
-    logger.info("application_started", version="1.0.0")
 
 @app.get("/")
 async def root():

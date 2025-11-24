@@ -331,6 +331,7 @@ class RoleRequestService:
         role_filter: Optional[str] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        search_query: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
     ) -> List[RoleRequest]:
@@ -338,11 +339,12 @@ class RoleRequestService:
         Get role requests with filters for admin access
         
         Args:
-            status_filter: Optional filter by status
+            status_filter: Optional filter by status (EXACT MATCH)
             user_id_filter: Optional filter by user ID
             role_filter: Optional filter by requested role name
             date_from: Optional filter by date from
             date_to: Optional filter by date to
+            search_query: Optional search by request ID or user ID (string, will be parsed to int)
             limit: Maximum number of results
             offset: Number of results to skip
             
@@ -351,6 +353,7 @@ class RoleRequestService:
         """
         query = self.db.query(RoleRequest)
         
+        # Enterprise-grade: Exact status match (not partial)
         if status_filter:
             query = query.filter(RoleRequest.status == status_filter)
         
@@ -368,14 +371,96 @@ class RoleRequestService:
         # This works for both PostgreSQL (ARRAY) and SQLite (JSON)
         results = query.order_by(RoleRequest.requested_at.desc()).all()
         
+        # Apply role filter in Python (database-agnostic)
         if role_filter:
             results = [req for req in results if role_filter in (req.requested_roles or [])]
         
-        # Apply pagination after filtering
+        # Apply search filter (by request ID or user ID)
+        # Enterprise-grade: Prioritize request ID match over user ID match
+        if search_query:
+            try:
+                # Try to parse as integer (for ID search)
+                search_id = int(search_query.strip())
+                # First try exact request ID match (more specific)
+                request_id_matches = [req for req in results if req.id == search_id]
+                if request_id_matches:
+                    results = request_id_matches
+                else:
+                    # Fallback to user ID match if no request ID match
+                    results = [req for req in results if req.user_id == search_id]
+            except (ValueError, AttributeError):
+                # If not a valid integer, return empty results
+                results = []
+        
+        # Apply pagination after all filtering
         total = len(results)
         results = results[offset:offset + limit]
         
         return results if results is not None else []
+    
+    def count_role_requests(
+        self,
+        status_filter: Optional[RoleRequestStatus] = None,
+        user_id_filter: Optional[int] = None,
+        role_filter: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        search_query: Optional[str] = None
+    ) -> int:
+        """
+        Count role requests with filters (for pagination)
+        
+        Args:
+            status_filter: Optional filter by status (EXACT MATCH)
+            user_id_filter: Optional filter by user ID
+            role_filter: Optional filter by requested role name
+            date_from: Optional filter by date from
+            date_to: Optional filter by date to
+            search_query: Optional search by request ID or user ID
+            
+        Returns:
+            Total count matching the filters
+        """
+        query = self.db.query(RoleRequest)
+        
+        # Enterprise-grade: Exact status match (not partial)
+        if status_filter:
+            query = query.filter(RoleRequest.status == status_filter)
+        
+        if user_id_filter:
+            query = query.filter(RoleRequest.user_id == user_id_filter)
+        
+        if date_from:
+            query = query.filter(RoleRequest.requested_at >= date_from)
+        
+        if date_to:
+            query = query.filter(RoleRequest.requested_at <= date_to)
+        
+        # Get all results for Python-side filtering
+        results = query.all()
+        
+        # Apply role filter in Python (database-agnostic)
+        if role_filter:
+            results = [req for req in results if role_filter in (req.requested_roles or [])]
+        
+        # Apply search filter (by request ID or user ID)
+        # Enterprise-grade: Prioritize request ID match over user ID match
+        if search_query:
+            try:
+                # Try to parse as integer (for ID search)
+                search_id = int(search_query.strip())
+                # First try exact request ID match (more specific)
+                request_id_matches = [req for req in results if req.id == search_id]
+                if request_id_matches:
+                    results = request_id_matches
+                else:
+                    # Fallback to user ID match if no request ID match
+                    results = [req for req in results if req.user_id == search_id]
+            except (ValueError, AttributeError):
+                # If not a valid integer, return empty results
+                results = []
+        
+        return len(results)
     
     async def check_kyc_required(
         self,

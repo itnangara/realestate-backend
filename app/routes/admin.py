@@ -27,6 +27,8 @@ from app.models.role_request import RoleRequest, RoleRequestStatus
 from app.dependencies.authorization_dependencies import get_admin_user
 from app.models.user import User
 from app.core.logger import get_logger
+from app.schemas.application import ApplicationResponse
+from app.services.application_service import ApplicationService
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -49,11 +51,12 @@ def get_role_granting_service(db: Session = Depends(get_db)) -> RoleGrantingServ
     response_description="List of role requests with optional filters and document attachments"
 )
 async def list_role_requests(
-    status_filter: Optional[RoleRequestStatus] = Query(None, description="Filter by status"),
+    status: Optional[RoleRequestStatus] = Query(None, description="Filter by status (pending, in_review, approved, rejected) - EXACT MATCH"),
     user_id: Optional[int] = Query(None, description="Filter by user ID"),
     role: Optional[str] = Query(None, description="Filter by requested role"),
-    date_from: Optional[datetime] = Query(None, description="Filter by date from"),
-    date_to: Optional[datetime] = Query(None, description="Filter by date to"),
+    date_from: Optional[datetime] = Query(None, description="Filter by date from (ISO 8601)"),
+    date_to: Optional[datetime] = Query(None, description="Filter by date to (ISO 8601)"),
+    search: Optional[str] = Query(None, description="Search by request ID or user ID"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     admin_user: User = Depends(get_admin_user),
@@ -65,48 +68,39 @@ async def list_role_requests(
     **Admin-only endpoint** - Only users with admin role can access this.
     
     Query parameters:
-    - status: Filter by status (pending, in_review, approved, rejected)
+    - status: Filter by status (pending, in_review, approved, rejected) - EXACT MATCH
     - user_id: Filter by specific user ID
-    - role: Filter by requested role name
-    - date_from: Filter requests from this date
-    - date_to: Filter requests until this date
+    - role: Filter by requested role name (seller, agent, landlord, tenant, investor)
+    - date_from: Filter requests from this date (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    - date_to: Filter requests until this date (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    - search: Search by request ID (integer) or user ID (integer)
     - limit: Maximum number of results (1-100, default 50)
     - offset: Number of results to skip (for pagination)
     """
     role_request_service = RoleRequestService(db)
     document_service = DocumentService(db)
     
-    # Get role requests with filters
-    # Note: role_filter is handled in the service with Python-side filtering
+    # Get role requests with filters (including search)
     requests = role_request_service.get_role_requests_with_documents(
-        status_filter=status_filter,
+        status_filter=status,
         user_id_filter=user_id,
         role_filter=role,
         date_from=date_from,
         date_to=date_to,
+        search_query=search,
         limit=limit,
         offset=offset
     )
     
-    # Get total count for pagination
-    # Enterprise-grade: Apply role filter in Python for database-agnostic compatibility
-    query = db.query(RoleRequest)
-    if status_filter:
-        query = query.filter(RoleRequest.status == status_filter)
-    if user_id:
-        query = query.filter(RoleRequest.user_id == user_id)
-    if date_from:
-        query = query.filter(RoleRequest.requested_at >= date_from)
-    if date_to:
-        query = query.filter(RoleRequest.requested_at <= date_to)
-    
-    # Apply role filter in Python (database-agnostic)
-    if role:
-        all_for_count = query.all()
-        filtered = [req for req in all_for_count if role in (req.requested_roles or [])]
-        total = len(filtered)
-    else:
-        total = query.count()
+    # Get total count for pagination (must match the same filters)
+    total = role_request_service.count_role_requests(
+        status_filter=status,
+        user_id_filter=user_id,
+        role_filter=role,
+        date_from=date_from,
+        date_to=date_to,
+        search_query=search
+    )
     
     # Build response with document attachments
     requests_with_docs = []
@@ -351,4 +345,54 @@ async def reject_role_request(
         attachments=attachments,
         trust_score=role_request.trust_score
     )
+
+
+# ------------------- Admin Application Routes ------------------- #
+
+@router.get(
+    "/applications",
+    response_model=List[ApplicationResponse],
+    summary="Get all applications (admin only)",
+    response_description="List of all applications in the system"
+)
+async def get_all_applications(
+    admin_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all applications in the system.
+    
+    **Admin-only endpoint** - Read-only access for monitoring and audit purposes.
+    """
+    service = ApplicationService(db)
+    apps = service.get_all_applications()
+    return [ApplicationResponse.model_validate(a) for a in apps]
+
+
+@router.get(
+    "/applications/{application_id}",
+    response_model=ApplicationResponse,
+    summary="Get application by ID (admin only)",
+    response_description="Application details"
+)
+async def get_admin_application(
+    application_id: int,
+    admin_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific application by ID.
+    
+    **Admin-only endpoint** - Read-only access for monitoring and audit purposes.
+    """
+    service = ApplicationService(db)
+    app = service.get_application_by_id(application_id)
+    
+    if not app:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found"
+        )
+    
+    return ApplicationResponse.model_validate(app)
 
