@@ -16,7 +16,7 @@ from app.utils.database import get_db
 from app.dependencies.user_dependencies import get_current_user, oauth2_scheme
 from app.services.auth_service import AuthService
 from app.models.user import User
-from app.models.lease import Lease
+from app.models.lease import Lease, LeaseStatus
 from app.core.event_bus import event_bus
 from app.core.logger import get_logger
 
@@ -113,6 +113,13 @@ async def lease_events(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to subscribe to this lease's events"
+        )
+    
+    # ACCESS CONTROL: Tenants cannot subscribe to DRAFT lease events
+    if is_tenant and lease.status == LeaseStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Lease not available yet. The landlord has not sent it to you."
         )
     
     # Subscribe to events

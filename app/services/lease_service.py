@@ -733,12 +733,57 @@ class LeaseService:
         
         return query.order_by(Lease.created_at.desc()).all()
     
-    def get_tenant_leases(self, tenant_id: int, status: Optional[LeaseStatus] = None) -> List[Lease]:
-        """Get all leases for a tenant"""
+    def get_tenant_leases(
+        self,
+        tenant_id: int,
+        status: Optional[LeaseStatus] = None,
+        property_id: Optional[int] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+        search: Optional[str] = None
+    ) -> List[Lease]:
+        """
+        Get all leases for a tenant with optional filtering.
+        
+        **Enterprise-grade business rules:**
+        - Tenants should NOT see DRAFT leases (only landlord can see drafts)
+        - Tenants can see: SENT, SIGNED, COUNTER_SIGNED, ACTIVE, TERMINATED, CANCELLED
+        - This ensures tenants only see leases that have been sent to them
+        
+        **Filtering:**
+        - status: Filter by lease status
+        - property_id: Filter by specific property
+        - date_from: Filter leases with start_date >= date_from
+        - date_to: Filter leases with end_date <= date_to
+        - search: Search by property title or address (case-insensitive)
+        """
         query = self.db.query(Lease).filter(Lease.tenant_id == tenant_id)
+        
+        # FLOW COMPLIANCE: Filter out DRAFT leases for tenants
+        # Tenants should only see leases that have been sent to them
+        query = query.filter(Lease.status != LeaseStatus.DRAFT)
         
         if status:
             query = query.filter(Lease.status == status)
+        
+        if property_id:
+            query = query.filter(Lease.property_id == property_id)
+        
+        if date_from:
+            query = query.filter(Lease.start_date >= date_from)
+        
+        if date_to:
+            query = query.filter(Lease.end_date <= date_to)
+        
+        if search:
+            # Join with Property table for search
+            query = query.join(Property).filter(
+                or_(
+                    Property.title.ilike(f"%{search}%"),
+                    Property.address.ilike(f"%{search}%"),
+                    Property.city.ilike(f"%{search}%")
+                )
+            )
         
         return query.order_by(Lease.created_at.desc()).all()
     

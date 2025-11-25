@@ -2,9 +2,12 @@
 Lease routes for rental lease management
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
+
+from app.utils.date_utils import parse_date_query_param
 
 from app.utils.database import get_db
 from app.schemas.lease import (
@@ -51,7 +54,7 @@ async def create_lease(
         )
     
     service = LeaseService(db)
-    lease = await service.create_lease(lease_data, current_user.id)
+    lease = service.create_lease(lease_data, current_user.id)
     
     # Load signatures
     db.refresh(lease)
@@ -95,6 +98,14 @@ async def get_lease(
             detail="Not enough permissions to view this lease"
         )
     
+    # 🔒 ENTERPRISE-GRADE ACCESS CONTROL: Tenants cannot view DRAFT leases
+    # Tenants may ONLY view leases that have been SENT to them (or later statuses)
+    if is_tenant and lease.status == LeaseStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Lease not available yet. The landlord has not sent it to you."
+        )
+    
     return LeaseResponse.model_validate(lease)
 
 
@@ -133,6 +144,13 @@ async def get_lease_by_application(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to view this lease"
+        )
+    
+    # ENTERPRISE-GRADE ACCESS CONTROL: Tenants cannot view DRAFT leases
+    if is_tenant and lease.status == LeaseStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Lease not available yet. The landlord has not sent it to you."
         )
     
     return LeaseResponse.model_validate(lease)
@@ -352,19 +370,35 @@ async def get_landlord_leases(
     "/tenant/leases",
     response_model=List[LeaseResponse],
     summary="Get tenant's leases",
-    response_description="List of all leases for the authenticated tenant"
+    response_description="List of all leases for the authenticated tenant with optional filtering"
 )
 async def get_tenant_leases(
-    status: Optional[LeaseStatus] = None,
+    status: Optional[LeaseStatus] = Query(None, description="Filter by lease status"),
+    property_id: Optional[int] = Query(None, description="Filter by property ID"),
+    date_from: Optional[datetime] = Query(None, description="Filter leases starting from date (ISO 8601)"),
+    date_to: Optional[datetime] = Query(None, description="Filter leases ending before date (ISO 8601)"),
+    search: Optional[str] = Query(None, description="Search by property title or address"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get all leases for the authenticated tenant.
+    Get all leases for the authenticated tenant with optional filtering.
     
     **Authorization:**
     - Tenant role required
     - Returns only leases where tenant_id = current_user.id
+    - DRAFT leases are always excluded (tenants cannot see drafts)
+    
+    **Filtering:**
+    - status: Filter by lease status (SENT, SIGNED, COUNTER_SIGNED, ACTIVE, TERMINATED, CANCELLED)
+    - property_id: Filter by specific property
+    - date_from: Filter leases with start_date >= date_from (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    - date_to: Filter leases with end_date <= date_to (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
+    - search: Search by property title or address (case-insensitive)
+    
+    **Date Format:**
+    - FastAPI automatically parses ISO 8601 dates from query parameters
+    - Supports both date-only (YYYY-MM-DD) and datetime (YYYY-MM-DDTHH:MM:SS) formats
     """
     if not current_user.has_role("tenant"):
         raise HTTPException(
@@ -373,7 +407,14 @@ async def get_tenant_leases(
         )
     
     service = LeaseService(db)
-    leases = service.get_tenant_leases(current_user.id, status)
+    leases = service.get_tenant_leases(
+        tenant_id=current_user.id,
+        status=status,
+        property_id=property_id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search
+    )
     
     return [LeaseResponse.model_validate(lease) for lease in leases]
 
@@ -461,4 +502,105 @@ async def auto_activate_leases(
         "activated_count": activated_count,
         "message": f"Activated {activated_count} lease(s)"
     }
+
+
+@router.get(
+    "/{lease_id}/pdf",
+    summary="Download lease PDF",
+    response_description="Lease document as PDF file",
+    responses={
+        200: {
+            "description": "PDF file",
+            "content": {"application/pdf": {}}
+        }
+    }
+)
+async def download_lease_pdf(
+    lease_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download lease as PDF document.
+    
+    **Enterprise-grade business rules:**
+    - Tenant can download their own leases
+    - Landlord can download leases for their properties
+    - Only available for signed/active leases (SIGNED, COUNTER_SIGNED, ACTIVE, TERMINATED)
+    
+    **Authorization:**
+    - Tenant can download their own leases
+    - Landlord can download leases for their properties
+    """
+    from fastapi.responses import Response
+    from io import BytesIO
+    
+    service = LeaseService(db)
+    lease = service.get_lease_by_id(lease_id)
+    
+    if not lease:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lease not found"
+        )
+    
+    # Verify access
+    is_tenant = current_user.has_role("tenant") and lease.tenant_id == current_user.id
+    is_landlord = (current_user.has_role("landlord") or current_user.has_role("agent")) and lease.landlord_id == current_user.id
+    
+    if not (is_tenant or is_landlord):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to download this lease"
+        )
+    
+    # Check if lease is in a downloadable state
+    if lease.status not in [LeaseStatus.SIGNED, LeaseStatus.COUNTER_SIGNED, LeaseStatus.ACTIVE, LeaseStatus.TERMINATED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot download lease in {lease.status.value} status. Lease must be signed or active."
+        )
+    
+    # TODO: Implement actual PDF generation
+    # For now, return a placeholder PDF or generate using a library like reportlab, weasyprint, etc.
+    # This is a placeholder implementation - replace with actual PDF generation
+    try:
+        # Placeholder: Generate a simple PDF with lease information
+        # In production, use a proper PDF library (reportlab, weasyprint, pdfkit, etc.)
+        pdf_content = f"""
+        LEASE AGREEMENT
+        ===============
+        
+        Lease ID: {lease.id}
+        Property ID: {lease.property_id}
+        Tenant ID: {lease.tenant_id}
+        Landlord ID: {lease.landlord_id}
+        
+        Monthly Rent: ${lease.rent}
+        Security Deposit: ${lease.deposit or 'N/A'}
+        
+        Start Date: {lease.start_date or 'N/A'}
+        End Date: {lease.end_date or 'N/A'}
+        
+        Status: {lease.status.value}
+        
+        Terms:
+        {lease.terms or 'No terms specified'}
+        
+        This is a placeholder PDF. Implement proper PDF generation in production.
+        """.encode('utf-8')
+        
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=lease-{lease.id}.pdf"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error generating PDF for lease {lease_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate PDF"
+        )
 
