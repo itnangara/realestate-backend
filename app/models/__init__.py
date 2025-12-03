@@ -12,6 +12,8 @@ from .tenant_profile import TenantProfile
 from .landlord_profile import LandlordProfile
 from .agent_profile import AgentProfile
 from .investor_profile import InvestorProfile
+from .maintenance_staff_profile import MaintenanceStaffProfile
+from .user_property import UserProperty, RelationshipType
 from .refresh_token import RefreshToken
 from .seller import Seller
 from .role_request import RoleRequest, RoleRequestStatus
@@ -21,6 +23,10 @@ from .audit_log import AuditLog
 from .user_limit import UserLimit
 from .email_verification_token import EmailVerificationToken
 from .lease import Lease, LeaseSignature, LeaseStatus
+from .maintenance import (
+    MaintenanceRequest, MaintenanceStatusHistory, MaintenanceAttachment,
+    MaintenanceActivity, MaintenanceStatus, MaintenancePriority, MaintenanceCategory
+)
 
 __all__ = [
     "User",
@@ -38,6 +44,9 @@ __all__ = [
     "LandlordProfile",
     "AgentProfile",
     "InvestorProfile",
+    "MaintenanceStaffProfile",
+    "UserProperty",
+    "RelationshipType",
     "RefreshToken",
     "Seller",
     "RoleRequest",
@@ -52,7 +61,14 @@ __all__ = [
     "EmailVerificationToken",
     "Lease",
     "LeaseSignature",
-    "LeaseStatus"
+    "LeaseStatus",
+    "MaintenanceRequest",
+    "MaintenanceStatusHistory",
+    "MaintenanceAttachment",
+    "MaintenanceActivity",
+    "MaintenanceStatus",
+    "MaintenancePriority",
+    "MaintenanceCategory"
 ]
 
 
