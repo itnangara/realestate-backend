@@ -448,7 +448,9 @@ async def get_property_leases(
         )
     
     # Verify access
-    is_landlord = (current_user.has_role("landlord") or current_user.has_role("agent")) and property.owner_id == current_user.id
+    # Enterprise-grade: Use unified ownership check instead of direct owner_id
+    from app.utils.property_ownership import is_property_owner
+    is_landlord = (current_user.has_role("landlord") or current_user.has_role("agent")) and is_property_owner(db, current_user.id, property.id)
     is_tenant = current_user.has_role("tenant")
     
     if not (is_landlord or is_tenant):

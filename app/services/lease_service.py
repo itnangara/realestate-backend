@@ -120,7 +120,10 @@ class LeaseService:
                 detail="Property not found"
             )
         
-        if property.owner_id != landlord_id:
+        # Check ownership using unified ownership check
+        from app.utils.property_ownership import is_property_owner
+        
+        if not is_property_owner(self.db, landlord_id, property_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions - you don't own this property"
@@ -216,8 +219,10 @@ class LeaseService:
             )
         
         # Verify landlord owns the property
+        # Enterprise-grade: Use unified ownership check instead of direct owner_id
+        from app.utils.property_ownership import is_property_owner
         property = self.db.query(Property).filter(Property.id == lease.property_id).first()
-        if not property or property.owner_id != landlord_id:
+        if not property or not is_property_owner(self.db, landlord_id, lease.property_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions - you don't own this property"
@@ -497,8 +502,10 @@ class LeaseService:
             )
         
         # Validate landlord
+        # Enterprise-grade: Use unified ownership check instead of direct owner_id
+        from app.utils.property_ownership import is_property_owner
         property = self.db.query(Property).filter(Property.id == lease.property_id).first()
-        if not property or property.owner_id != landlord_id:
+        if not property or not is_property_owner(self.db, landlord_id, lease.property_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions - you don't own this property"

@@ -13,6 +13,7 @@ from app.models.application import Application, ApplicationStatus
 from app.models.user import User
 from app.models.property import Property, PropertyStatus
 from app.models.document import Document
+from app.models.user_property import UserProperty, RelationshipType
 from app.schemas.application import ApplicationCreate, ApplicationUpdate
 from app.core.logger import get_logger
 
@@ -113,13 +114,20 @@ class ApplicationService:
         
         if landlord_id:
             # Landlord endpoint: only applications for their properties
-            # Enterprise-grade: Use join for efficient filtering
-            property_ids = [
-                p.id for p in self.db.query(Property.id).filter(
-                    Property.owner_id == landlord_id,
-                    Property.is_active == True
+            # Enterprise-grade: Use unified user_properties table exclusively
+            from sqlalchemy import union_all, select
+            
+            # Get property IDs from user_properties (LANDLORD relationship)
+            landlord_property_ids = [
+                up.property_id for up in self.db.query(UserProperty)
+                .filter(
+                    UserProperty.user_id == landlord_id,
+                    UserProperty.relationship_type == RelationshipType.LANDLORD
                 ).all()
             ]
+            
+            # Enterprise-grade: Use unified model exclusively
+            property_ids = landlord_property_ids
             if property_ids:
                 query = query.filter(Application.property_id.in_(property_ids))
             else:
@@ -821,15 +829,17 @@ class ApplicationService:
         Get all applications for properties owned by the landlord.
         
         **Enterprise-grade filtering:**
-        - Only returns applications for properties where property.owner_id = landlord_id
+        - Only returns applications for properties where landlord has LANDLORD relationship (via user_properties)
         """
-        # Get all properties owned by landlord
-        properties = self.db.query(Property).filter(
-            Property.owner_id == landlord_id,
-            Property.is_active == True
-        ).all()
+        # Get all properties owned by landlord using unified ownership
+        from app.utils.property_ownership import get_property_owners
         
-        property_ids = [p.id for p in properties]
+        # Get all properties and filter by ownership
+        all_properties = self.db.query(Property).filter(Property.is_active == True).all()
+        property_ids = [
+            p.id for p in all_properties
+            if landlord_id in get_property_owners(self.db, p.id)
+        ]
         
         if not property_ids:
             return []

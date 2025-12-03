@@ -126,15 +126,23 @@ class Property(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     
-    # Foreign keys
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    agent_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    
-    # Relationships
-    owner = relationship("User", foreign_keys=[owner_id], back_populates="properties")
-    agent = relationship("User", foreign_keys=[agent_id])
+    # DEPRECATED: owner_id and agent_id removed - use user_properties table instead
+    # Foreign keys removed - ownership managed via user_properties table
     applications = relationship("Application", back_populates="property")
     favorites = relationship("Favorite", back_populates="property")
+    
+    # Unified user-property relationships
+    user_properties = relationship(
+        "UserProperty", back_populates="property", cascade="all, delete-orphan"
+    )
+    owners = relationship(
+        "User",
+        secondary="user_properties",
+        primaryjoin="Property.id==UserProperty.property_id",
+        secondaryjoin="User.id==UserProperty.user_id",
+        viewonly=True,
+        overlaps="user_properties",
+    )
     
     # Table-level constraints for data integrity
     __table_args__ = (

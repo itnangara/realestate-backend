@@ -67,50 +67,158 @@ class PropertyService:
         
         return query.offset(skip).limit(limit).all()
     
-    def create_property(self, property_data: PropertyCreate, owner_id: int) -> Property:
-        """Create a new property"""
-        # Calculate price per sqft if both price and square_feet are provided
-        price_per_sqft = None
-        if property_data.price and property_data.square_feet:
-            price_per_sqft = property_data.price / property_data.square_feet
+    def create_property(self, property_data: PropertyCreate, user: User) -> Property:
+        """
+        Enterprise-grade: Create a new property using unified user_properties model.
         
-        # Build features array from features field (if provided)
-        features = property_data.features if hasattr(property_data, 'features') and property_data.features else []
+        Industry-standard transaction safety:
+        - All validation happens BEFORE any database writes
+        - Uses database transactions with automatic rollback on error
+        - No partial property creation - all-or-nothing atomicity
         
-        # Create property object
-        property = Property(
-            title=property_data.title,
-            description=property_data.description,
-            property_type=property_data.property_type,
-            listing_type=property_data.listing_type,
-            status=property_data.status,
-            address=property_data.address,
-            city=property_data.city,
-            state=property_data.state,
-            zip_code=property_data.zip_code,
-            country=property_data.country,
-            latitude=property_data.latitude,
-            longitude=property_data.longitude,
-            bedrooms=property_data.bedrooms,
-            bathrooms=property_data.bathrooms,
-            square_feet=property_data.square_feet,
-            lot_size=property_data.lot_size,
-            year_built=property_data.year_built,
-            price=property_data.price,
-            rent_price=property_data.rent_price,
-            price_per_sqft=price_per_sqft,
-            features=features if features else None,
-            is_furnished=property_data.is_furnished,
-            pet_friendly=property_data.pet_friendly,
-            owner_id=owner_id
-        )
+        No owner_id parameter - ownership is managed via user_properties table.
+        """
+        # Enterprise-grade: Validate ALL required fields BEFORE any database operations
+        # This prevents partial property creation if validation fails later
+        validation_errors = []
         
-        # Add to database
-        self.db.add(property)
-        self.db.commit()
-        self.db.refresh(property)
+        if not property_data.title or not property_data.title.strip():
+            validation_errors.append("title is required")
         
-        return property
+        if not property_data.city or not property_data.city.strip():
+            validation_errors.append("city is required")
+        
+        if not property_data.country or not property_data.country.strip():
+            validation_errors.append("country is required")
+        
+        if not property_data.property_type:
+            validation_errors.append("property_type is required")
+        
+        if not property_data.listing_type:
+            validation_errors.append("listing_type is required")
+        
+        # Business rule: description is required for property listings
+        if not property_data.description or not property_data.description.strip():
+            validation_errors.append("description is required")
+        
+        # Validate pricing based on listing type
+        if property_data.listing_type == ListingType.FOR_RENT or property_data.listing_type == ListingType.FOR_LEASE:
+            if not property_data.rent_price or property_data.rent_price <= 0:
+                validation_errors.append("rent_price is required and must be greater than 0 for rental properties")
+        elif property_data.listing_type == ListingType.FOR_SALE:
+            if not property_data.price or property_data.price <= 0:
+                validation_errors.append("price is required and must be greater than 0 for sale properties")
+        
+        # If any validation errors, raise BEFORE any database operations
+        if validation_errors:
+            error_message = "Validation failed: " + "; ".join(validation_errors)
+            logger.warning(
+                event="property_creation_validation_failed",
+                user_id=user.id,
+                user_email=user.email,
+                errors=validation_errors
+            )
+            raise ValueError(error_message)
+        
+        # Enterprise-grade: Use transaction with automatic rollback on error
+        try:
+            # Calculate price per sqft if both price and square_feet are provided
+            price_per_sqft = None
+            if property_data.price and property_data.square_feet:
+                price_per_sqft = property_data.price / property_data.square_feet
+            
+            # Build features array from features field (if provided)
+            features = property_data.features if hasattr(property_data, 'features') and property_data.features else []
+            
+            # Create property object (no owner_id - using unified model only)
+            property = Property(
+                title=property_data.title,
+                description=property_data.description,
+                property_type=property_data.property_type,
+                listing_type=property_data.listing_type,
+                status=property_data.status,
+                address=property_data.address,
+                city=property_data.city,
+                state=property_data.state,
+                zip_code=property_data.zip_code,
+                country=property_data.country,
+                latitude=property_data.latitude,
+                longitude=property_data.longitude,
+                bedrooms=property_data.bedrooms,
+                bathrooms=property_data.bathrooms,
+                square_feet=property_data.square_feet,
+                lot_size=property_data.lot_size,
+                year_built=property_data.year_built,
+                price=property_data.price,
+                rent_price=property_data.rent_price,
+                price_per_sqft=price_per_sqft,
+                features=features if features else None,
+                is_furnished=property_data.is_furnished,
+                pet_friendly=property_data.pet_friendly
+            )
+            
+            # Add to database (not yet committed)
+            self.db.add(property)
+            self.db.flush()  # Get property ID without committing
+            
+            # Enterprise-grade: Create unified user_properties link for owner (required)
+            # Determine relationship type based on user role and listing type
+            from app.models.user_property import UserProperty, RelationshipType
+            
+            # Determine relationship type based on listing type and user role
+            relationship_type = RelationshipType.LANDLORD
+            if property_data.listing_type == ListingType.FOR_SALE:
+                # For sale properties, use SELLER relationship
+                relationship_type = RelationshipType.SELLER
+            elif property_data.listing_type == ListingType.FOR_RENT or property_data.listing_type == ListingType.FOR_LEASE:
+                # For rent/lease properties, use LANDLORD relationship
+                relationship_type = RelationshipType.LANDLORD
+            
+            # Check if link already exists (idempotent)
+            existing = (
+                self.db.query(UserProperty)
+                .filter(
+                    UserProperty.user_id == user.id,
+                    UserProperty.property_id == property.id,
+                    UserProperty.relationship_type == relationship_type
+                )
+                .first()
+            )
+            
+            if not existing:
+                link = UserProperty(
+                    user_id=user.id,
+                    property_id=property.id,
+                    relationship_type=relationship_type
+                )
+                self.db.add(link)
+                logger.info(
+                    event="property_owner_link_created",
+                    property_id=property.id,
+                    user_id=user.id,
+                    relationship_type=relationship_type.value
+                )
+            
+            # Commit transaction - all-or-nothing atomicity
+            self.db.commit()
+            self.db.refresh(property)
+            
+            return property
+            
+        except Exception as e:
+            # Enterprise-grade: Rollback transaction on ANY error
+            # This ensures no partial property creation
+            self.db.rollback()
+            logger.error(
+                event="property_creation_transaction_rolled_back",
+                user_id=user.id,
+                user_email=user.email,
+                error_type=type(e).__name__,
+                error_message=str(e),
+                exc_info=True
+            )
+            # Re-raise to let caller handle
+            raise
     
     def update_property(self, property_id: int, property_data: PropertyUpdate) -> Optional[Property]:
         """Update a property"""
@@ -162,9 +270,24 @@ class PropertyService:
         Enterprise-grade: Returns all properties owned by user (any status except DELETED).
         Role-based filtering is applied at the route layer using PropertyPermissionService.
         """
+        # Enterprise-grade: Use unified user_properties table for ownership
+        from app.models.user_property import UserProperty, RelationshipType
+        
+        property_ids = [
+            up.property_id for up in self.db.query(UserProperty)
+            .filter(
+                UserProperty.user_id == user_id,
+                UserProperty.relationship_type == RelationshipType.LANDLORD
+            )
+            .all()
+        ]
+        
+        if not property_ids:
+            return []
+        
         return self.db.query(Property).filter(
             and_(
-                Property.owner_id == user_id,
+                Property.id.in_(property_ids),
                 Property.status != PropertyStatus.DELETED  # Exclude soft-deleted
             )
         ).all()
@@ -420,9 +543,45 @@ class PropertyService:
                 )
                 
                 if allowed_listing_types:
+                    # Get property IDs from unified user_properties table
+                    # Enterprise-grade: Map role_context to appropriate relationship types
+                    from app.models.user_property import UserProperty, RelationshipType
+                    
+                    # Determine relationship types based on role_context
+                    # This ensures properties are retrieved correctly regardless of how they were created
+                    relationship_types = []
+                    if role_context:
+                        if role_context == "landlord":
+                            relationship_types = [RelationshipType.LANDLORD]
+                        elif role_context == "seller":
+                            relationship_types = [RelationshipType.SELLER]
+                        elif role_context == "agent":
+                            # Agents can have properties as both seller (for_sale) and landlord (for_rent)
+                            relationship_types = [RelationshipType.SELLER, RelationshipType.LANDLORD, RelationshipType.AGENT]
+                        elif role_context == "investor":
+                            relationship_types = [RelationshipType.INVESTOR]
+                    else:
+                        # No role_context: Get all relationship types for user's owner roles
+                        # This is backward compatible behavior
+                        relationship_types = [
+                            RelationshipType.LANDLORD,
+                            RelationshipType.SELLER,
+                            RelationshipType.AGENT,
+                            RelationshipType.INVESTOR
+                        ]
+                    
+                    # Query for properties with any of the relevant relationship types
+                    user_property_ids = [
+                        up.property_id for up in self.db.query(UserProperty)
+                        .filter(
+                            UserProperty.user_id == user.id,
+                            UserProperty.relationship_type.in_(relationship_types)
+                        ).all()
+                    ]
+                    
                     query = query.filter(
                         and_(
-                            Property.owner_id == user.id,  # Only own properties
+                            Property.id.in_(user_property_ids) if user_property_ids else Property.id == -1,
                             Property.status != PropertyStatus.DELETED,  # Exclude deleted
                             Property.listing_type.in_([lt.value for lt in allowed_listing_types])  # Role-context-aware types
                         )
@@ -646,8 +805,8 @@ class PropertyService:
                     f"User role does not allow creating {property_data.listing_type.value} properties"
                 )
         
-        # Create property
-        property = self.create_property(property_data, user.id)
+        # Create property (using unified model - no owner_id)
+        property = self.create_property(property_data, user)
         
         # Audit log
         logger.info(
@@ -691,16 +850,15 @@ class PropertyService:
             raise ValueError("Property not found")
         
         # Enterprise-grade: Explicit ownership check before update
-        # Service layer always verifies ownership (property.owner_id == user.id) OR admin role
+        # Service layer always verifies ownership using unified model OR admin role
         # This prevents unauthorized updates even if route layer is bypassed
-        if not PropertyPermissionService.can_update_property(user, property):
+        if not PropertyPermissionService.can_update_property(user, property, self.db):
             logger.warning(
                 event="property_update_permission_denied",
                 request_id=request_id or "unknown",
                 user_id=user.id,
                 user_email=user.email,
                 property_id=property_id,
-                property_owner_id=property.owner_id,
                 user_roles=user.roles
             )
             raise ValueError("User does not have permission to update this property")
@@ -762,16 +920,15 @@ class PropertyService:
             raise ValueError("Property not found")
         
         # Enterprise-grade: Explicit ownership check before delete
-        # Service layer always verifies ownership (property.owner_id == user.id) OR admin role
+        # Service layer always verifies ownership using unified model OR admin role
         # This prevents unauthorized deletes even if route layer is bypassed
-        if not PropertyPermissionService.can_delete_property(user, property):
+        if not PropertyPermissionService.can_delete_property(user, property, self.db):
             logger.warning(
                 event="property_delete_permission_denied",
                 request_id=request_id or "unknown",
                 user_id=user.id,
                 user_email=user.email,
                 property_id=property_id,
-                property_owner_id=property.owner_id,
                 user_roles=user.roles
             )
             raise ValueError("User does not have permission to delete this property")

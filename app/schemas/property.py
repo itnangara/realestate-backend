@@ -9,8 +9,8 @@ from app.models.property import PropertyType, PropertyStatus, ListingType
 
 class PropertyBase(BaseModel):
     """Base property schema"""
-    title: str
-    description: Optional[str] = None
+    title: str = Field(..., min_length=1, description="Property title (required)")
+    description: str = Field(..., min_length=1, description="Property description (required)")
     property_type: PropertyType
     listing_type: Optional[ListingType] = None
     status: PropertyStatus = PropertyStatus.DRAFT
@@ -76,8 +76,7 @@ class PropertyResponse(PropertyBase):
     is_featured: bool = False
     views_count: int = 0
     is_active: bool = True
-    owner_id: int
-    agent_id: Optional[int] = None
+    is_owner: bool = False  # Computed: True if current user owns this property (via user_properties with LANDLORD relationship)
     created_at: datetime
     updated_at: Optional[datetime] = None
     

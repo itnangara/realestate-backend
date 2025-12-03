@@ -5,6 +5,7 @@ Centralized permission logic for role-based property CRUD operations.
 """
 
 from typing import List, Optional
+from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.property import Property, ListingType, PropertyStatus
 
@@ -60,7 +61,7 @@ class PropertyPermissionService:
         return False
     
     @staticmethod
-    def can_read_property(user: Optional[User], property: Property) -> bool:
+    def can_read_property(user: Optional[User], property: Property, db: Optional[Session] = None) -> bool:
         """
         Check if user can read/view a property.
         
@@ -73,6 +74,7 @@ class PropertyPermissionService:
         Args:
             user: The user (None for public/guest)
             property: The property to check
+            db: Database session (required for ownership check if user is provided)
             
         Returns:
             True if user can read, False otherwise
@@ -104,9 +106,13 @@ class PropertyPermissionService:
         # Owner roles: Can view their own properties (any status) OR public listings
         owner_roles = ["seller", "agent", "landlord", "investor"]
         if any(user.has_role(role) for role in owner_roles):
-            # Own property: can see any status (except DELETED, which is filtered above)
-            if property.owner_id == user.id:
-                return True
+            # Enterprise-grade: Use unified ownership check
+            if db:
+                from app.utils.property_ownership import is_property_owner
+                if is_property_owner(db, user.id, property.id):
+                    return True
+            # If db not provided, cannot check ownership (fail secure)
+            return False
             # Not own property: can view public listings
             return is_public_listing
         
@@ -115,7 +121,7 @@ class PropertyPermissionService:
         return is_public_listing
     
     @staticmethod
-    def can_update_property(user: User, property: Property) -> bool:
+    def can_update_property(user: User, property: Property, db: Optional[Session] = None) -> bool:
         """
         Check if user can update a property.
         
@@ -123,11 +129,12 @@ class PropertyPermissionService:
         
         Rules:
         - Admin: Can update any property (bypasses ownership check)
-        - Owners: Can update ONLY their own properties (explicit ownership check: property.owner_id == user.id)
+        - Owners: Can update ONLY their own properties (uses unified ownership check)
         
         Args:
             user: The user attempting to update
             property: The property to update
+            db: Database session (required for unified ownership check)
             
         Returns:
             True if user can update, False otherwise
@@ -140,13 +147,17 @@ class PropertyPermissionService:
         # Owners can update ONLY their own properties
         owner_roles = ["seller", "agent", "landlord", "investor"]
         if any(user.has_role(role) for role in owner_roles):
-            # Explicit ownership verification: property must belong to user
-            return property.owner_id == user.id
+            # Enterprise-grade: Use unified ownership check
+            if db:
+                from app.utils.property_ownership import is_property_owner
+                return is_property_owner(db, user.id, property.id)
+            # If db not provided, cannot check ownership (fail secure)
+            return False
         
         return False
     
     @staticmethod
-    def can_delete_property(user: User, property: Property) -> bool:
+    def can_delete_property(user: User, property: Property, db: Optional[Session] = None) -> bool:
         """
         Check if user can delete a property.
         
@@ -154,11 +165,12 @@ class PropertyPermissionService:
         
         Rules:
         - Admin: Can delete any property (bypasses ownership check)
-        - Owners: Can delete ONLY their own properties (explicit ownership check: property.owner_id == user.id)
+        - Owners: Can delete ONLY their own properties (uses unified ownership check)
         
         Args:
             user: The user attempting to delete
             property: The property to delete
+            db: Database session (required for unified ownership check)
             
         Returns:
             True if user can delete, False otherwise
@@ -171,8 +183,12 @@ class PropertyPermissionService:
         # Explicit ownership verification: property must belong to user
         owner_roles = ["seller", "agent", "landlord", "investor"]
         if any(user.has_role(role) for role in owner_roles):
-            # Explicit ownership check: property.owner_id == user.id
-            return property.owner_id == user.id
+            # Enterprise-grade: Use unified ownership check
+            if db:
+                from app.utils.property_ownership import is_property_owner
+                return is_property_owner(db, user.id, property.id)
+            # If db not provided, cannot check ownership (fail secure)
+            return False
         
         return False
     

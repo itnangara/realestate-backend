@@ -32,12 +32,34 @@ router = APIRouter(prefix="/landlord", tags=["Landlord"])
 logger = get_logger(__name__)
 
 
-def verify_landlord_access(property: Property, current_user: User) -> bool:
-    """Verify user has access to property (owner, landlord, or agent)"""
-    is_owner = property.owner_id == current_user.id
+def verify_landlord_access(property: Property, current_user: User, db: Session) -> bool:
+    """
+    Verify user has access to property (owner, landlord, or agent).
+    
+    Uses unified user_properties table as primary source with fallback to owner_id.
+    """
+    from app.utils.property_ownership import is_property_owner
+    from app.models.user_property import UserProperty, RelationshipType
+    
+    # Check ownership via unified table
+    is_owner = is_property_owner(db, current_user.id, property.id)
+    
+    # Check if user has landlord or agent role
     is_landlord = current_user.has_role("landlord")
     is_agent = current_user.has_role("agent")
-    return is_owner or is_landlord or is_agent
+    
+    # Check if user has AGENT or ADMIN relationship type in user_properties
+    has_management_link = (
+        db.query(UserProperty)
+        .filter(
+            UserProperty.user_id == current_user.id,
+            UserProperty.property_id == property.id,
+            UserProperty.relationship_type.in_([RelationshipType.AGENT, RelationshipType.ADMIN])
+        )
+        .first() is not None
+    )
+    
+    return is_owner or (is_landlord and has_management_link) or (is_agent and has_management_link)
 
 
 @router.get(
@@ -64,7 +86,7 @@ async def get_landlord_applications(
     
     **Authorization:**
     - Landlord/agent role required
-    - Returns only applications for properties where property.owner_id = current_user.id
+    - Returns only applications for properties where user has LANDLORD relationship (via user_properties table)
     
     **Filters (all use AND logic):**
     - status: EXACT match on application status
@@ -150,7 +172,7 @@ async def get_landlord_application(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -192,7 +214,7 @@ async def get_property_applications(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -254,7 +276,7 @@ async def review_application(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -313,7 +335,7 @@ async def approve_application(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -371,7 +393,7 @@ async def reject_application(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -430,7 +452,7 @@ async def request_more_info(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -488,7 +510,7 @@ async def sign_lease(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"
@@ -548,7 +570,7 @@ async def activate_lease(
             detail="Property not found"
         )
     
-    if not verify_landlord_access(property, current_user):
+    if not verify_landlord_access(property, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions - you don't own this property"

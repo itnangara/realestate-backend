@@ -18,6 +18,7 @@ from app.dependencies.authorization_dependencies import get_admin_user, get_opti
 from app.models.user import User
 from app.models.property import ListingType, PropertyStatus, PropertyType
 from app.core.logger import get_logger
+from app.utils.property_serialization import serialize_property, serialize_properties
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -170,7 +171,7 @@ async def get_properties(
     )
     
     return PropertySearchResponse(
-        properties=[PropertyResponse.model_validate(p) for p in properties],
+        properties=serialize_properties(properties, user, db),
         total_count=total_count,
         page=(skip // limit) + 1,
         limit=limit,
@@ -330,7 +331,7 @@ async def search_properties_get(
         limit=filters.limit
     )
     return PropertySearchResponse(
-        properties=[PropertyResponse.model_validate(p) for p in properties],
+        properties=serialize_properties(properties, user, db),
         total_count=total_count,
         page=filters.page,
         limit=filters.limit,
@@ -476,7 +477,7 @@ async def get_all_properties(
     )
     
     return PropertySearchResponse(
-        properties=[PropertyResponse.model_validate(p) for p in properties],
+        properties=serialize_properties(properties, admin_user, db),
         total_count=total_count,
         page=filters.page,
         limit=filters.limit,
@@ -516,7 +517,7 @@ async def get_property(
     # Enterprise-grade: Check read permission using centralized permission service
     from app.services.property_permissions import PropertyPermissionService
     
-    if not PropertyPermissionService.can_read_property(user, property):
+    if not PropertyPermissionService.can_read_property(user, property, db):
         # Log access denial for security monitoring
         request_id = getattr(request.state, "request_id", "unknown")
         logger.warning(
@@ -527,7 +528,6 @@ async def get_property(
             property_id=property_id,
             property_listing_type=property.listing_type.value if property.listing_type else None,
             property_status=property.status.value,
-            property_owner_id=property.owner_id,
             user_roles=user.roles if user else []
         )
         raise HTTPException(
@@ -535,7 +535,7 @@ async def get_property(
             detail="You do not have permission to view this property"
         )
     
-    return PropertyResponse.model_validate(property)
+    return serialize_property(property, user, db)
 
 
 @router.post(
@@ -554,6 +554,11 @@ async def create_property(
     """
     Enterprise-grade role-aware property creation.
     
+    Industry-standard transaction safety:
+    - All validation happens BEFORE any database writes
+    - Uses database transactions with automatic rollback on error
+    - No partial property creation - all-or-nothing atomicity
+    
     Permission rules:
     - Admin: any listing type
     - Seller: FOR_SALE only
@@ -571,28 +576,33 @@ async def create_property(
             user=current_user,
             request_id=request_id
         )
-        return PropertyResponse.model_validate(property)
+        return serialize_property(property, current_user, db)
     except ValueError as e:
-        # Permission denied or validation error
+        # Validation error or permission denied
+        # Transaction already rolled back in service layer
+        error_message = str(e)
+        status_code = status.HTTP_400_BAD_REQUEST if "Validation failed" in error_message else status.HTTP_403_FORBIDDEN
+        
         logger.warning(
             event="property_creation_denied",
             request_id=request_id,
             user_id=current_user.id,
             user_email=current_user.email,
-            error_message=str(e),
+            error_message=error_message,
             user_roles=current_user.roles
         )
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(e)
+            status_code=status_code,
+            detail=error_message
         )
     except Exception as e:
+        # Any other error - transaction already rolled back in service layer
         logger.error(
             event="property_creation_failed",
             request_id=request_id,
             user_id=current_user.id,
             user_email=current_user.email,
-            property_title=property_data.title,
+            property_title=property_data.title if property_data else "unknown",
             error_type=type(e).__name__,
             error_message=str(e),
             exc_info=True,
@@ -634,7 +644,7 @@ async def update_property(
             user=current_user,
             request_id=request_id
         )
-        return PropertyResponse.model_validate(updated_property)
+        return serialize_property(updated_property, current_user, db)
     except ValueError as e:
         if "not found" in str(e).lower():
             raise HTTPException(
@@ -784,7 +794,7 @@ async def search_properties_post(
         limit=filters.limit
     )
     return PropertySearchResponse(
-        properties=[PropertyResponse.model_validate(p) for p in properties],
+        properties=serialize_properties(properties, user, db),
         total_count=total_count,
         page=filters.page,
         limit=filters.limit,

@@ -19,9 +19,10 @@ class UserRoles:
     TENANT = "tenant"
     INVESTOR = "investor"
     ADMIN = "admin"
+    MAINTENANCE_STAFF = "maintenance_staff"
     
     # All available roles
-    ALL_ROLES = [BUYER, SELLER, AGENT, LANDLORD, TENANT, INVESTOR, ADMIN]
+    ALL_ROLES = [BUYER, SELLER, AGENT, LANDLORD, TENANT, INVESTOR, ADMIN, MAINTENANCE_STAFF]
 
 
 class UserStatus(str, enum.Enum):
@@ -80,9 +81,23 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
     # Relationships
-    properties = relationship("Property", foreign_keys="Property.owner_id", back_populates="owner")
+    # DEPRECATED: properties relationship removed - use user_properties table instead
+    # properties = relationship("Property", foreign_keys="Property.owner_id", back_populates="owner")
     applications = relationship("Application", foreign_keys="Application.applicant_id", back_populates="applicant")
     favorites = relationship("Favorite", foreign_keys="Favorite.user_id", back_populates="user")
+    
+    # Unified user-property relationships
+    user_properties = relationship(
+        "UserProperty", back_populates="user", cascade="all, delete-orphan"
+    )
+    properties_via_link = relationship(
+        "Property",
+        secondary="user_properties",
+        primaryjoin="User.id==UserProperty.user_id",
+        secondaryjoin="Property.id==UserProperty.property_id",
+        viewonly=True,
+        overlaps="user_properties",
+    )
     
     # Relational role system
     user_roles = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
@@ -92,6 +107,7 @@ class User(Base):
     landlord_profile = relationship("LandlordProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     agent_profile = relationship("AgentProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     investor_profile = relationship("InvestorProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    maintenance_staff_profile = relationship("MaintenanceStaffProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     
     # Refresh tokens relationship
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
@@ -161,3 +177,8 @@ class User(Base):
     def is_admin(self) -> bool:
         """Check if user is an admin"""
         return self.has_role("admin")
+    
+    @property
+    def is_maintenance_staff(self) -> bool:
+        """Check if user is maintenance staff"""
+        return self.has_role("maintenance_staff")
