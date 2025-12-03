@@ -77,9 +77,11 @@ def setup_test_data(db: Session):
             city="Test City",
             state="TS",
             zip_code="12345",
-            owner_id=landlord.id
         )
         db.add(property1)
+        db.flush()
+        link1 = UserProperty(user_id=landlord.id, property_id=property1.id, relationship_type=RelationshipType.LANDLORD)
+        db.add(link1)
         db.commit()
         db.refresh(property1)
     
@@ -96,9 +98,11 @@ def setup_test_data(db: Session):
             city="Test City",
             state="TS",
             zip_code="12345",
-            owner_id=landlord.id
         )
         db.add(property2)
+        db.flush()
+        link2 = UserProperty(user_id=landlord.id, property_id=property2.id, relationship_type=RelationshipType.LANDLORD)
+        db.add(link2)
         db.commit()
         db.refresh(property2)
     

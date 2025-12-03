@@ -14,7 +14,9 @@ from app.models.property import PropertyType, PropertyStatus, ListingType
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
+from app.models.user_property import UserProperty, RelationshipType
 from app.services.auth_service import AuthService
+from app.utils.property_ownership import get_property_owners
 
 
 @pytest.fixture(scope="function")
@@ -104,10 +106,12 @@ def test_property_for_lease(db_session, test_user_landlord):
         zip_code="12345",
         price=1200.00,
         rent_price=1500.00,
-        owner_id=test_user_landlord.id,
         is_active=True
     )
     db_session.add(property)
+    db_session.flush()
+    link = UserProperty(user_id=test_user_landlord.id, property_id=property.id, relationship_type=RelationshipType.LANDLORD)
+    db_session.add(link)
     db_session.commit()
     db_session.refresh(property)
     return property
@@ -305,14 +309,14 @@ class TestAutomaticLeaseCreation:
 class TestTerminateLease:
     """Test lease termination functionality"""
     
-    def test_terminate_active_lease_success(self, client: TestClient, auth_landlord_token, auth_tenant_token, approved_application, db_session):
+    def test_terminate_active_lease_success(self, client: TestClient, auth_landlord_token, auth_tenant_token, approved_application, db_session, test_user_landlord):
         """Test successful lease termination"""
         from app.models.lease import Lease, LeaseSignature
         
         # Create and fully sign lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1500.00"),
@@ -333,7 +337,7 @@ class TestTerminateLease:
         )
         landlord_sig = LeaseSignature(
             lease_id=lease.id,
-            user_id=approved_application.property.owner_id,
+            user_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             role="landlord",
             signature_text="Landlord",
             signed_at=datetime.now(timezone.utc)
@@ -369,14 +373,14 @@ class TestTerminateLease:
         db_session.refresh(approved_application.property)
         assert approved_application.property.is_active == True
     
-    def test_terminate_lease_only_active(self, client: TestClient, auth_landlord_token, approved_application, db_session):
+    def test_terminate_lease_only_active(self, client: TestClient, auth_landlord_token, approved_application, db_session, test_user_landlord):
         """Test that only ACTIVE leases can be terminated"""
         from app.models.lease import Lease
         
         # Create DRAFT lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1500.00"),
@@ -404,14 +408,14 @@ class TestTerminateLease:
 class TestStatusTransitionEnforcement:
     """Test strict status transition enforcement"""
     
-    def test_sign_only_from_sent(self, client: TestClient, auth_tenant_token, approved_application, db_session):
+    def test_sign_only_from_sent(self, client: TestClient, auth_tenant_token, approved_application, db_session, test_user_landlord):
         """Test that tenant can only sign from SENT status (not DRAFT)"""
         from app.models.lease import Lease
         
         # Create DRAFT lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1500.00"),
@@ -431,14 +435,14 @@ class TestStatusTransitionEnforcement:
         error_text = str(sign_response.json()["detail"]).lower()
         assert "sent" in error_text
     
-    def test_activate_only_from_counter_signed(self, client: TestClient, auth_landlord_token, approved_application, db_session):
+    def test_activate_only_from_counter_signed(self, client: TestClient, auth_landlord_token, approved_application, db_session, test_user_landlord):
         """Test that lease can only be activated from COUNTER_SIGNED (not SIGNED)"""
         from app.models.lease import Lease, LeaseSignature
         
         # Create and send lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1500.00"),
@@ -475,7 +479,7 @@ class TestStatusTransitionEnforcement:
             error_text = detail.get("message", str(detail)).lower()
         assert "counter_signed" in error_text or "counter-signed" in error_text
     
-    def test_activate_requires_start_date(self, client: TestClient, auth_landlord_token, approved_application, db_session):
+    def test_activate_requires_start_date(self, client: TestClient, auth_landlord_token, approved_application, db_session, test_user_landlord):
         """Test that lease cannot be activated before start_date"""
         from app.models.lease import Lease, LeaseSignature
         
@@ -483,7 +487,7 @@ class TestStatusTransitionEnforcement:
         future_start = datetime.now(timezone.utc) + timedelta(days=30)
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1500.00"),
@@ -504,7 +508,7 @@ class TestStatusTransitionEnforcement:
         )
         landlord_sig = LeaseSignature(
             lease_id=lease.id,
-            user_id=approved_application.property.owner_id,
+            user_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             role="landlord",
             signature_text="Landlord",
             signed_at=datetime.now(timezone.utc)

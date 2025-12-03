@@ -10,6 +10,7 @@ from app.models.property import Property, ListingType, PropertyStatus, PropertyT
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
+from app.models.user_property import UserProperty, RelationshipType
 
 
 class TestRoleAwarePropertyListing:
@@ -42,9 +43,12 @@ class TestRoleAwarePropertyListing:
                 state="TS",
                 zip_code="12345",
                 price=100000,
-                owner_id=1
             )
             db_session.add(prop)
+            db_session.flush()  # Get property ID
+            # Create unified ownership link
+            link = UserProperty(user_id=1, property_id=prop.id, relationship_type=RelationshipType.LANDLORD)
+            db_session.add(link)
         db_session.commit()
         
         # Public request (no auth)
@@ -74,7 +78,6 @@ class TestRoleAwarePropertyListing:
             state="TS",
             zip_code="12345",
             price=100000,
-            owner_id=1
         )
         db_session.add(prop)
         
@@ -89,10 +92,12 @@ class TestRoleAwarePropertyListing:
             city="Test City",
             state="TS",
             zip_code="12345",
-            price=200000,
-            owner_id=2
+            price=200000
         )
         db_session.add(portfolio_prop)
+        db_session.flush()
+        link = UserProperty(user_id=2, property_id=portfolio_prop.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link)
         db_session.commit()
         
         # Buyer request
@@ -145,10 +150,12 @@ class TestRoleAwarePropertyListing:
             city="Test City",
             state="TS",
             zip_code="12345",
-            price=100000,
-            owner_id=999  # Different owner
+            price=100000
         )
         db_session.add(public_prop)
+        db_session.flush()
+        link1 = UserProperty(user_id=999, property_id=public_prop.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link1)
         
         # Seller's own draft (seller should see)
         own_draft = Property(
@@ -162,10 +169,12 @@ class TestRoleAwarePropertyListing:
             city="Test City",
             state="TS",
             zip_code="12345",
-            price=200000,
-            owner_id=seller.id  # Seller's own
+            price=200000
         )
         db_session.add(own_draft)
+        db_session.flush()
+        link2 = UserProperty(user_id=seller.id, property_id=own_draft.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link2)
         
         # Another seller's draft (seller should NOT see)
         other_draft = Property(
@@ -179,10 +188,12 @@ class TestRoleAwarePropertyListing:
             city="Test City",
             state="TS",
             zip_code="12345",
-            price=300000,
-            owner_id=888  # Different owner
+            price=300000
         )
         db_session.add(other_draft)
+        db_session.flush()
+        link3 = UserProperty(user_id=888, property_id=other_draft.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link3)
         db_session.commit()
         
         # Seller request
@@ -218,10 +229,12 @@ class TestRoleAwarePropertyListing:
                 city="Test City",
                 state="TS",
                 zip_code="12345",
-                price=100000,
-                owner_id=1
+                price=100000
             )
             db_session.add(prop)
+            db_session.flush()
+            link = UserProperty(user_id=1, property_id=prop.id, relationship_type=RelationshipType.LANDLORD)
+            db_session.add(link)
         db_session.commit()
         
         # Admin request
@@ -247,10 +260,12 @@ class TestRoleAwarePropertyListing:
             city="Test City",
             state="TS",
             zip_code="12345",
-            price=100000,
-            owner_id=1
+            price=100000
         )
         db_session.add(deleted_prop)
+        db_session.flush()
+        link = UserProperty(user_id=1, property_id=deleted_prop.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link)
         db_session.commit()
         
         # Admin /all endpoint

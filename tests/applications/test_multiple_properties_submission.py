@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.models.application import Application, ApplicationStatus
 from app.models.property import Property, PropertyStatus, ListingType, PropertyType
+from app.models.user_property import UserProperty, RelationshipType
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
@@ -106,10 +107,12 @@ def property_1(db_session, test_landlord_user):
         bedrooms=1,
         bathrooms=1.0,
         square_feet=800,
-        owner_id=test_landlord_user.id,
         is_active=True
     )
     db_session.add(property)
+    db_session.flush()
+    link = UserProperty(user_id=test_landlord_user.id, property_id=property.id, relationship_type=RelationshipType.LANDLORD)
+    db_session.add(link)
     db_session.commit()
     db_session.refresh(property)
     return property
@@ -133,10 +136,12 @@ def property_2(db_session, test_landlord_user):
         bedrooms=2,
         bathrooms=1.5,
         square_feet=1000,
-        owner_id=test_landlord_user.id,
         is_active=True
     )
     db_session.add(property)
+    db_session.flush()
+    link = UserProperty(user_id=test_landlord_user.id, property_id=property.id, relationship_type=RelationshipType.LANDLORD)
+    db_session.add(link)
     db_session.commit()
     db_session.refresh(property)
     return property

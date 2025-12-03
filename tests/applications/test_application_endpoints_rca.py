@@ -335,7 +335,7 @@ class TestLandlordEndpoints:
     def test_landlord_can_see_only_own_properties_applications(self, client, landlord_headers, db_session, test_user_landlord, test_user_tenant):
         """
         RCA: Instrument & Analyze - Landlord sees only applications for their properties
-        Expected: GET /api/landlord/applications returns only apps for properties where owner_id = landlord.id
+        Expected: GET /api/landlord/applications returns only apps for properties where landlord has LANDLORD relationship
         """
         # Create property owned by landlord
         property1 = Property(
@@ -348,10 +348,12 @@ class TestLandlordEndpoints:
             state="TS",
             zip_code="12345",
             country="USA",
-            owner_id=test_user_landlord.id,
             is_active=True
         )
         db_session.add(property1)
+        db_session.flush()
+        link1 = UserProperty(user_id=test_user_landlord.id, property_id=property1.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link1)
         
         # Create property owned by someone else
         other_landlord = User(
@@ -376,10 +378,12 @@ class TestLandlordEndpoints:
             state="TS",
             zip_code="12345",
             country="USA",
-            owner_id=other_landlord.id,
             is_active=True
         )
         db_session.add(property2)
+        db_session.flush()
+        link2 = UserProperty(user_id=other_landlord.id, property_id=property2.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link2)
         db_session.commit()
         db_session.refresh(property1)
         db_session.refresh(property2)

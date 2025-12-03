@@ -10,6 +10,7 @@ from app.models.property import Property, ListingType, PropertyStatus, PropertyT
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
+from app.models.user_property import UserProperty, RelationshipType
 from app.services.auth_service import AuthService
 
 
@@ -99,7 +100,6 @@ class TestComprehensiveRoleAwareScenarios:
             zip_code="12345",
             country="USA",
             price=100000,
-            owner_id=999  # Different owner
         ))
         
         properties.append(Property(
@@ -220,6 +220,19 @@ class TestComprehensiveRoleAwareScenarios:
         
         for prop in properties:
             db_session.add(prop)
+            db_session.flush()  # Get property ID
+            # Determine owner_id from prop data (if it was set)
+            # For seller's own properties, use test_user_seller.id
+            # For others, use the owner_id that was in the original code
+            owner_id = getattr(prop, '_test_owner_id', None)
+            if owner_id is None:
+                # Default: assign to test_user_seller if it's a seller property
+                if 'Seller' in prop.title:
+                    owner_id = test_user_seller.id
+                else:
+                    owner_id = 999  # Default different owner
+            link = UserProperty(user_id=owner_id, property_id=prop.id, relationship_type=RelationshipType.LANDLORD)
+            db_session.add(link)
         db_session.commit()
         
         return properties

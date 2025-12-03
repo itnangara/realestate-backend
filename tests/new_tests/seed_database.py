@@ -23,7 +23,8 @@ REQUIRED_ROLES = [
     {"name": "landlord", "description": "Property owner renting properties"},
     {"name": "tenant", "description": "User looking to rent properties"},
     {"name": "investor", "description": "Property investor"},
-    {"name": "admin", "description": "System administrator"}
+    {"name": "admin", "description": "System administrator"},
+    {"name": "maintenance_staff", "description": "Maintenance staff member"}
 ]
 
 def seed_roles(db):

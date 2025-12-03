@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.application import Application, ApplicationStatus
 from app.models.user import User
 from app.models.property import Property, PropertyStatus, PropertyType, ListingType
+from app.models.user_property import UserProperty, RelationshipType
 from app.services.application_service import ApplicationService
 
 
@@ -82,10 +83,12 @@ def test_properties(db_session, test_users):
             zip_code="12345",
             country="USA",
             price=1000 * (i + 1),
-            owner_id=landlord.id,
             is_active=True
         )
         db_session.add(prop)
+        db_session.flush()
+        link = UserProperty(user_id=landlord.id, property_id=prop.id, relationship_type=RelationshipType.LANDLORD)
+        db_session.add(link)
         properties.append(prop)
     db_session.commit()
     for prop in properties:
@@ -533,11 +536,16 @@ class TestTenantVsLandlordDifferences:
         # All applications are for landlord's properties
         assert total == 5
         property_ids = {app.property_id for app in items}
-        # Verify all properties belong to landlord
-        landlord_properties = db_session.query(Property).filter(
-            Property.owner_id == landlord.id
-        ).all()
-        landlord_property_ids = {p.id for p in landlord_properties}
+        # Verify all properties belong to landlord (using unified model)
+        from app.models.user_property import UserProperty, RelationshipType
+        landlord_property_ids = {
+            up.property_id for up in db_session.query(UserProperty)
+            .filter(
+                UserProperty.user_id == landlord.id,
+                UserProperty.relationship_type == RelationshipType.LANDLORD
+            )
+            .all()
+        }
         assert property_ids.issubset(landlord_property_ids)
     
     def test_landlord_search_includes_applicant_id(self, db_session, test_applications, test_users):

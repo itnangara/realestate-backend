@@ -91,6 +91,7 @@ def auth_tenant_token(client, test_user_tenant):
 def test_property_for_lease(db_session, test_user_landlord):
     """Create a test property owned by landlord"""
     from app.models.property import Property, PropertyType, PropertyStatus, ListingType
+from app.models.user_property import UserProperty, RelationshipType
     
     property = Property(
         title="Test Property for Lease",
@@ -103,10 +104,12 @@ def test_property_for_lease(db_session, test_user_landlord):
         state="TS",
         zip_code="12345",
         price=1200.00,
-        owner_id=test_user_landlord.id,
         is_active=True
     )
     db_session.add(property)
+    db_session.flush()
+    link = UserProperty(user_id=test_user_landlord.id, property_id=property.id, relationship_type=RelationshipType.LANDLORD)
+    db_session.add(link)
     db_session.commit()
     db_session.refresh(property)
     return property
@@ -205,7 +208,7 @@ class TestLeaseCreation:
         # Create first lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),
@@ -249,7 +252,7 @@ class TestLeaseSend:
         # Create lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),
@@ -278,7 +281,7 @@ class TestLeaseSend:
         # Create SENT lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),
@@ -314,7 +317,7 @@ class TestLeaseSigning:
         # Create and send lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),
@@ -349,7 +352,7 @@ class TestLeaseSigning:
         # Create and send lease
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),
@@ -393,7 +396,7 @@ class TestLeaseCounterSign:
         # Create lease, send, and tenant signs
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),
@@ -440,7 +443,7 @@ class TestLeaseActivation:
         # Create lease, send, and tenant signs
         lease = Lease(
             application_id=approved_application.id,
-            landlord_id=approved_application.property.owner_id,
+            landlord_id=get_property_owners(db_session, approved_application.property_id)[0] if get_property_owners(db_session, approved_application.property_id) else test_user_landlord.id,
             tenant_id=approved_application.applicant_id,
             property_id=approved_application.property_id,
             rent=Decimal("1200.00"),

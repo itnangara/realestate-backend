@@ -33,7 +33,6 @@ def test_properties(client, db_session):
             features=["pool", "garage", "garden"],
             is_featured=True,
             year_built=2015,
-            owner_id=1,
             is_active=True
         ),
         Property(
@@ -53,7 +52,6 @@ def test_properties(client, db_session):
             features=["elevator", "gym"],
             is_featured=False,
             year_built=2020,
-            owner_id=1,
             is_active=True
         ),
         Property(
@@ -73,7 +71,6 @@ def test_properties(client, db_session):
             features=["loft", "exposed_brick"],
             is_featured=True,
             year_built=1920,
-            owner_id=1,
             is_active=True
         ),
     ]

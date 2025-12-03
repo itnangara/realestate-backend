@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from decouple import config
 import os
-from app.routes import auth, properties, users, favorites, seller, role_routes, documents, webhooks, admin, tenant, landlord
+from app.routes import auth, properties, users, favorites, seller, role_routes, documents, webhooks, admin, admin_users, tenant, landlord, maintenance, maintenance_staff
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
 from app.core.limiter import limiter, init_limiter
@@ -28,8 +28,17 @@ from fastapi.responses import JSONResponse
 logger = get_logger(__name__)
 
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables (idempotent - handles existing tables/indexes gracefully)
+# Enterprise-grade: In production, use Alembic migrations instead of create_all()
+try:
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+except Exception as e:
+    # Log but don't fail startup - tables/indexes may already exist from migrations
+    logger.warning(
+        "database_table_creation_skipped",
+        message="Some tables/indexes may already exist (this is normal with Alembic migrations)",
+        error=str(e)
+    )
 
 
 # Lifespan context manager for startup/shutdown events
@@ -50,8 +59,8 @@ app = FastAPI(
     title="Real Estate API",
     description="A comprehensive real estate management API",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
+    docs_url="/api/docs" if config("ENVIRONMENT") == "development" else None,
+    redoc_url="/api/redoc" if config("ENVIRONMENT") == "development" else None,
     lifespan=lifespan
 )
 
@@ -451,24 +460,24 @@ async def global_exception_handler(request: Request, exc: Exception):
     return add_cors_headers(response, request)
 
 # Include routers
+# Applications router: all endpoints use role-scoped routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(properties.router, prefix="/api/properties", tags=["Properties"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
-# Applications router removed - all endpoints moved to role-scoped routes:
-# - /api/tenant/applications/* (tenant routes)
-# - /api/landlord/applications/* (landlord routes)
-# - /api/admin/applications/* (admin routes)
 app.include_router(favorites.router, prefix="/api/favorites", tags=["Favorites"])
 app.include_router(seller.router, prefix="/api/sellers", tags=["Sellers"])
 app.include_router(role_routes.router, prefix="/api/roles", tags=["Roles"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
+app.include_router(admin_users.router, prefix="/api/admin", tags=["Admin - Users"])
 app.include_router(tenant.router, prefix="/api", tags=["Tenant"])
 app.include_router(landlord.router, prefix="/api", tags=["Landlord"])
 from app.routes import lease, lease_sse
 app.include_router(lease.router, prefix="/api", tags=["Leases"])
 app.include_router(lease_sse.router, prefix="/api", tags=["Leases", "SSE"])
+app.include_router(maintenance.router, prefix="/api", tags=["Maintenance"])
+app.include_router(maintenance_staff.router, prefix="/api", tags=["Maintenance - Staff"])
 
 # Setup monitoring and metrics
 setup_metrics(app)
