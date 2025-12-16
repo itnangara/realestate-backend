@@ -28,19 +28,6 @@ from fastapi.responses import JSONResponse
 logger = get_logger(__name__)
 
 
-# Create database tables (idempotent - handles existing tables/indexes gracefully)
-# Enterprise-grade: In production, use Alembic migrations instead of create_all()
-try:
-    Base.metadata.create_all(bind=engine, checkfirst=True)
-except Exception as e:
-    # Log but don't fail startup - tables/indexes may already exist from migrations
-    logger.warning(
-        "database_table_creation_skipped",
-        message="Some tables/indexes may already exist (this is normal with Alembic migrations)",
-        error=str(e)
-    )
-
-
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,7 +39,6 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown (if needed in future)
     # logger.info("application_shutting_down")
-
 
 # Initialize FastAPI app with lifespan
 app = FastAPI(
@@ -334,6 +320,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     
     # Log validation errors with structured logging - include detailed error messages
     # Also print to console for immediate visibility
+    # Very useful ***
     error_summary = "; ".join(error_messages)
     print(f"\n❌ VALIDATION ERROR on {request.method} {request.url.path}")
     print(f"   Fields with errors: {', '.join([e['field'] for e in field_errors])}")
@@ -459,7 +446,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
     return add_cors_headers(response, request)
 
-# Include routers
 # Applications router: all endpoints use role-scoped routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(properties.router, prefix="/api/properties", tags=["Properties"])

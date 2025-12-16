@@ -1,0 +1,14 @@
+# Pre-commit hooks for enterprise-grade code quality
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  - repo: local
+    hooks:
+      - id: validate-api-docs
+        name: Validate API Documentation
+        entry: python scripts/validate_api_docs.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit, push]
+

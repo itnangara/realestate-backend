@@ -673,6 +673,6 @@ class UserManagementService:
         print("delete_user: Isaac details, start")
         print(user)
         print("delete_user: Isaac details, end")
-        # self.db.delete(user)
+        self.db.delete(user)
         self.db.commit()
 
