@@ -13,11 +13,12 @@ from app.utils.database import get_db
 from app.schemas.maintenance import (
     MaintenanceRequestCreate, MaintenanceRequestUpdate, MaintenanceRequestResponse,
     MaintenanceRequestListResponse, MaintenanceRequestAssign, MaintenanceRequestSummary,
+    StaffUserSchema,
     MaintenanceAttachmentCreate, MaintenanceCommentCreate
 )
 from app.services.maintenance_service import MaintenanceService
 from app.models.maintenance import MaintenanceStatus, MaintenancePriority, MaintenanceCategory
-from app.dependencies.user_dependencies import get_current_user
+from app.dependencies.user_dependencies import get_current_user, get_current_landlord_user
 from app.models.user import User
 from app.core.logger import get_logger
 
@@ -193,6 +194,27 @@ async def upload_maintenance_attachments(
     
     return MaintenanceRequestResponse(**response_data)
 
+
+def get_maintenance_service(db: Session = Depends(get_db)):
+    """Provides a MaintenanceService instance with a database session."""
+    return MaintenanceService(db)
+
+@router.get(
+    "/staff",
+    response_model=List[StaffUserSchema],
+    status_code=status.HTTP_200_OK,
+)
+def get_maintenance_staff(
+    current_user: User=Depends(get_current_landlord_user),
+    service: MaintenanceService = Depends(get_maintenance_service)
+):
+    """
+    Retrieves the list of available maintenance staff for assignment.
+    Accessible by Landlords and Property Managers.
+    """
+    # The service layer must now filter the staff list based on the properties managed by current_user.
+    return service.get_maintenance_staff_scoped_by_landlord(landlord_id=current_user.id)
+    
 
 @router.get(
     "",
@@ -381,7 +403,6 @@ async def get_maintenance_summary(
     
     return MaintenanceRequestSummary(**summary)
 
-
 def _build_request_response(request, db: Session) -> dict:
     """Helper function to build response with related data"""
     from app.models.property import Property
@@ -500,4 +521,3 @@ def _build_request_response(request, db: Session) -> dict:
         "status_history": status_history,
         "activities": activities
     }
-

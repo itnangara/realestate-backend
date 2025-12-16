@@ -15,6 +15,9 @@ import enum
 class MaintenanceStatus(str, enum.Enum):
     """Maintenance status enum - enterprise-grade unified workflow"""
     REPORTED = "REPORTED"  # Tenant submits request
+    
+    # TODO: Rename "REVIEWING" to "IN_REVIEW"
+
     REVIEWING = "REVIEWING"  # Property Manager reviews
     ASSIGNED = "ASSIGNED"  # Manager assigns task
     ACKNOWLEDGED = "ACKNOWLEDGED"  # Staff acknowledges

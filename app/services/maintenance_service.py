@@ -4,6 +4,7 @@ Enterprise-grade business logic with proper validation and audit logging
 """
 
 from sqlalchemy.orm import Session
+from sqlalchemy import distinct
 from sqlalchemy import and_, or_, func, desc
 from fastapi import HTTPException, status
 from typing import List, Optional, Tuple, Dict, Any
@@ -15,7 +16,10 @@ from app.models.maintenance import (
     MaintenanceActivity, MaintenanceStatus, MaintenancePriority, MaintenanceCategory
 )
 from app.models.property import Property
+from app.schemas.maintenance_staff import StaffUserSchema
 from app.models.user import User
+from app.models.user_property import UserProperty, RelationshipType
+from app.models.maintenance_staff_profile import MaintenanceStaffProfile
 from app.schemas.maintenance import (
     MaintenanceRequestCreate, MaintenanceRequestUpdate, MaintenanceRequestAssign,
     MaintenanceCommentCreate
@@ -23,7 +27,6 @@ from app.schemas.maintenance import (
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
-
 
 # Valid status transitions - enterprise-grade workflow compliance
 VALID_TRANSITIONS: Dict[str, List[str]] = {
@@ -390,7 +393,7 @@ class MaintenanceService:
         
         # Update assignment
         if assign_data.assigned_staff_id:
-            # Validate staff exists and has appropriate role
+            # Validate staff exists and has appropriate role: TODO: Add correct role validation
             staff = self.db.query(User).filter(User.id == assign_data.assigned_staff_id).first()
             if not staff:
                 raise HTTPException(
@@ -570,7 +573,86 @@ class MaintenanceService:
                 summary[status_key] = count
         
         return summary
-    
+        
+    def get_maintenance_staff(self) -> List[StaffUserSchema]:
+        """
+        Retrieves active maintenance staff by joining User and MaintenanceProfile tables, 
+        and validates the combined result into the output Pydantic schema.
+        """
+        # 1. Execute the Query: Select both the User and the Profile record
+        # This returns a list of tuples: [(User, MaintenanceStaffProfile), ...]
+        query_result: List[Tuple[User, MaintenanceStaffProfile]] = self.db.query(
+            User, 
+            MaintenanceStaffProfile # Select both tables
+        ).join(
+            MaintenanceStaffProfile,
+            MaintenanceStaffProfile.user_id == User.id
+        ).filter(
+            User.is_active == True
+        ).all()
+
+        # 2. Map Results to the Pydantic Schema
+        # For each tuple (user, profile) in the result:
+        return [
+            StaffUserSchema.model_validate({
+                # Map User fields
+                "id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                # Map Profile fields (assuming the schema includes profile data)
+                "specialty": profile.specialty,
+                # etc.
+            })
+            for user, profile in query_result
+        ]
+
+    def get_maintenance_staff_scoped_by_landlord(self, landlord_id: int) -> List[StaffUserSchema]:
+        """
+        [SCOPED - For API use]
+        Retrieves maintenance staff who are explicitly associated with properties
+        that the given landlord manages. This enforces strict role-based access control (RBAC).
+        """
+        
+        # 1. Subquery to find all Property IDs managed by the given Landlord
+        managed_properties_query = self.db.query(UserProperty.property_id).filter(
+            UserProperty.user_id == landlord_id,
+            UserProperty.relationship_type == RelationshipType.LANDLORD
+        ).subquery()
+        
+        # 2. Subquery to find the distinct User IDs of all Maintenance Staff 
+        #    who work on the properties found in Step 1.
+        staff_user_ids_query = self.db.query(
+            distinct(UserProperty.user_id)
+        ).filter(
+            UserProperty.property_id.in_(managed_properties_query),
+            UserProperty.relationship_type == RelationshipType.MAINTENANCE_STAFF
+        ).subquery()
+        
+        # 3. Final Query: Retrieve User and Profile details for the filtered staff IDs
+        query_result: List[Tuple[User, MaintenanceStaffProfile]] = self.db.query(
+            User, 
+            MaintenanceStaffProfile
+        ).join(
+            MaintenanceStaffProfile,
+            MaintenanceStaffProfile.user_id == User.id
+        ).filter(
+            User.id.in_(staff_user_ids_query),
+            User.is_active == True
+        ).all()
+        
+        # 4. Map Results to the Pydantic Schema (StaffUserSchema)
+        return [
+            StaffUserSchema.model_validate({
+                "id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "phone": user.phone,
+            })
+            for user, profile in query_result
+        ]
+
     def list_assigned(
         self,
         staff_user: User,

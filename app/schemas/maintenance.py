@@ -3,12 +3,18 @@ Maintenance schemas for API request/response validation
 Enterprise-grade Pydantic models with proper validation
 """
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from app.models.maintenance import MaintenanceStatus, MaintenancePriority, MaintenanceCategory
 
+# 🟢 IMPORT NEW SCHEMA FILE
+from app.schemas.maintenance_staff import StaffUserSchema 
+
+# -----------------------------------------------
+## Maintenance Core Schemas
+# -----------------------------------------------
 
 class MaintenanceAttachmentBase(BaseModel):
     """Base attachment schema"""
@@ -126,7 +132,8 @@ class MaintenanceRequestResponse(MaintenanceRequestBase):
     # Related data
     property: Optional[Dict[str, Any]] = None  # Property details
     tenant: Optional[Dict[str, Any]] = None  # Tenant details
-    assigned_staff: Optional[Dict[str, Any]] = None  # Staff details
+    # 📝 Uses the imported StaffUserSchema
+    assigned_staff: Optional[StaffUserSchema] = None  
     attachments: List[MaintenanceAttachmentResponse] = []
     status_history: List[MaintenanceStatusHistoryResponse] = []
     activities: List[MaintenanceActivityResponse] = []
@@ -181,7 +188,10 @@ class MaintenanceCommentResponse(BaseModel):
         from_attributes = True
 
 
-# Staff-specific schemas
+# -----------------------------------------------
+## Staff-Specific Schemas
+# -----------------------------------------------
+
 class StaffAcknowledgeRequest(BaseModel):
     """Schema for staff acknowledging a request"""
     note: Optional[str] = Field(None, description="Optional acknowledgment note")
