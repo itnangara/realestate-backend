@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from decouple import config
 import os
-from app.routes import auth, properties, users, favorites, seller, role_routes, documents, webhooks, admin, admin_users, tenant, landlord, maintenance, maintenance_staff
+from app.routes import auth, properties, users, favorites, seller, role_routes, documents, webhooks, admin, admin_users, tenant, landlord, maintenance, maintenance_staff, viewings
 from app.utils.database import engine, Base
 from app.core.cache import init_cache
 from app.core.limiter import limiter, init_limiter
@@ -464,6 +464,7 @@ app.include_router(lease.router, prefix="/api", tags=["Leases"])
 app.include_router(lease_sse.router, prefix="/api", tags=["Leases", "SSE"])
 app.include_router(maintenance.router, prefix="/api", tags=["Maintenance"])
 app.include_router(maintenance_staff.router, prefix="/api", tags=["Maintenance - Staff"])
+app.include_router(viewings.router, prefix="/api", tags=["Viewings"])
 
 # Setup monitoring and metrics
 setup_metrics(app)

@@ -27,6 +27,7 @@ from .maintenance import (
     MaintenanceRequest, MaintenanceStatusHistory, MaintenanceAttachment,
     MaintenanceActivity, MaintenanceStatus, MaintenancePriority, MaintenanceCategory
 )
+from .viewing import ViewingRequest, ViewingStatus
 
 __all__ = [
     "User",
@@ -68,7 +69,9 @@ __all__ = [
     "MaintenanceActivity",
     "MaintenanceStatus",
     "MaintenancePriority",
-    "MaintenanceCategory"
+    "MaintenanceCategory",
+    "ViewingRequest",
+    "ViewingStatus"
 ]
 
 
