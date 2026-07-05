@@ -16,7 +16,7 @@ from app.schemas.tenant import (
     TenantOnboardingStatus,
     TenantDashboardResponse
 )
-from app.schemas.application import ApplicationResponse, ApplicationCreate, ApplicationUpdate, ApplicationListResponse
+from app.schemas.application import ApplicationResponse, ApplicationCreate, ApplicationUpdate, ApplicationListResponse, ApplicationDetailResponse
 from app.services.tenant_service import TenantService
 from app.services.tenant_onboarding_service import TenantOnboardingService
 from app.services.application_service import ApplicationService
@@ -215,7 +215,6 @@ async def get_tenant_dashboard(
         has_tenant_role=current_user.has_role("tenant")
     )
 
-
 @router.get(
     "/leases",
     response_model=List[ApplicationResponse],
@@ -309,32 +308,15 @@ async def get_tenant_applications(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Get filtered and paginated applications for the authenticated tenant.
-    
-    **Authorization:**
-    - Tenant role required
-    - Returns only applications belonging to the authenticated user
-    
-    **Filters (all use AND logic):**
-    - status: EXACT match on application status
-    - property_id: Filter by specific property
-    - date_from: Applications created on or after this date
-    - date_to: Applications created on or before this date
-    - search: Numeric search across application ID and property ID
-    
-    **Pagination:**
-    - page: Page number (default 1)
-    - limit: Items per page (default 20, max 100)
-    """
     if not current_user.has_role("tenant"):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=403,
             detail="Tenant role required"
         )
     
     service = ApplicationService(db)
-    items, total = service.get_filtered_applications(
+    
+    items, total, status_counts = service.get_filtered_applications(
         user_id=current_user.id,
         status=status,
         property_id=property_id,
@@ -350,15 +332,15 @@ async def get_tenant_applications(
     return ApplicationListResponse(
         items=[ApplicationResponse.model_validate(a) for a in items],
         total=total,
+        status_counts=status_counts,
         page=page,
         limit=limit,
         pages=pages
     )
 
-
 @router.get(
     "/applications/{application_id}",
-    response_model=ApplicationResponse,
+    response_model=ApplicationDetailResponse,
     summary="Get tenant application by ID",
     response_description="Application details",
     tags=["Applications"]
@@ -396,7 +378,7 @@ async def get_tenant_application(
             detail="Not enough permissions"
         )
     
-    return ApplicationResponse.model_validate(app)
+    return ApplicationDetailResponse.model_validate(app)
 
 
 @router.patch(
@@ -564,3 +546,4 @@ async def withdraw_application(
     
     withdrawn_app = service.withdraw_application(application_id, current_user.id)
     return ApplicationResponse.model_validate(withdrawn_app)
+

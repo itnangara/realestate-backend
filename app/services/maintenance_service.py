@@ -30,8 +30,8 @@ logger = get_logger(__name__)
 
 # Valid status transitions - enterprise-grade workflow compliance
 VALID_TRANSITIONS: Dict[str, List[str]] = {
-    MaintenanceStatus.REPORTED: [MaintenanceStatus.REVIEWING, MaintenanceStatus.REJECTED, MaintenanceStatus.CANCELLED],
-    MaintenanceStatus.REVIEWING: [MaintenanceStatus.ASSIGNED, MaintenanceStatus.REJECTED, MaintenanceStatus.CANCELLED],
+    MaintenanceStatus.REPORTED: [MaintenanceStatus.IN_REVIEW, MaintenanceStatus.REJECTED, MaintenanceStatus.CANCELLED],
+    MaintenanceStatus.IN_REVIEW: [MaintenanceStatus.ASSIGNED, MaintenanceStatus.REJECTED, MaintenanceStatus.CANCELLED],
     MaintenanceStatus.ASSIGNED: [MaintenanceStatus.ACKNOWLEDGED, MaintenanceStatus.CANCELLED],
     MaintenanceStatus.ACKNOWLEDGED: [MaintenanceStatus.IN_PROGRESS],
     MaintenanceStatus.IN_PROGRESS: [MaintenanceStatus.COMPLETED],
@@ -171,7 +171,7 @@ class MaintenanceService:
             MaintenanceRequest.id == request_id,
             MaintenanceRequest.is_active == True
         ).first()
-    
+
     def list_requests(
         self,
         user: User,
@@ -182,28 +182,21 @@ class MaintenanceService:
         search: Optional[str] = None,
         page: int = 1,
         limit: int = 20
-    ) -> Tuple[List[MaintenanceRequest], int]:
+    ) -> Tuple[List[MaintenanceRequest], int, Dict[str, int]]:
         """
-        List maintenance requests with role-based filtering.
-        
-        **Role-based filtering:**
-        - Tenant: Only their own requests
-        - Landlord/Agent: Requests for their properties
-        - Staff: Assigned requests
-        - Admin: All requests
+        List maintenance requests with role-based filtering and status padding.
+        Returns: (items, total_count, status_counts)
         """
         query = self.db.query(MaintenanceRequest).filter(MaintenanceRequest.is_active == True)
         
-        # Role-based filtering
+        # Role-based Scope Filtering
         if user.has_role("tenant"):
             query = query.filter(MaintenanceRequest.tenant_id == user.id)
         elif user.has_role("landlord") or user.has_role("agent"):
-            # Enterprise-grade: Get properties owned/managed by user using unified ownership model
             from app.models.user_property import UserProperty, RelationshipType
             
-            # Get property IDs from user_properties table exclusively
             property_ids = [
-                up.property_id for up in self.db.query(UserProperty)
+                up.property_id for up in self.db.query(UserProperty.property_id)
                 .filter(
                     UserProperty.user_id == user.id,
                     UserProperty.relationship_type.in_([RelationshipType.LANDLORD, RelationshipType.AGENT, RelationshipType.ADMIN])
@@ -213,16 +206,13 @@ class MaintenanceService:
             if property_ids:
                 query = query.filter(MaintenanceRequest.property_id.in_(property_ids))
             else:
-                # No properties - return empty result
                 query = query.filter(MaintenanceRequest.id == -1)
         elif user.has_role("admin"):
-            # Admin sees all
             pass
         else:
-            # Staff sees assigned requests
             query = query.filter(MaintenanceRequest.assigned_staff_id == user.id)
         
-        # Apply filters
+        # Dynamic Filters
         if status:
             query = query.filter(MaintenanceRequest.status == status)
         if property_id:
@@ -239,15 +229,30 @@ class MaintenanceService:
             )
             query = query.filter(search_filter)
         
-        # Get total count
+        # Calculate Metrics (Before Pagination)
         total = query.count()
         
-        # Pagination
+        # ARCHITECT'S PAD: Initialize all possible statuses to 0
+        status_counts: Dict[str, int] = {s.value: 0 for s in MaintenanceStatus}
+        status_counts["all"] = int(total)
+
+        # Get status grouping for the current filtered query
+        db_counts = query.with_entities(
+            MaintenanceRequest.status, 
+            func.count(MaintenanceRequest.id)
+        ).group_by(MaintenanceRequest.status).all()
+
+        for st, c in db_counts:
+            # Handle both Enum objects and raw strings
+            key = st.value if hasattr(st, "value") else str(st)
+            status_counts[str(key)] = int(c)
+        
+        # 4. Pagination & Execution
         offset = (page - 1) * limit
         requests = query.order_by(desc(MaintenanceRequest.created_at)).offset(offset).limit(limit).all()
         
-        return requests, total
-    
+        return requests, total, status_counts    
+
     def update_status(
         self,
         request_id: int,
@@ -273,7 +278,7 @@ class MaintenanceService:
             )
         
         # Authorization checks for specific transitions
-        if new_status == MaintenanceStatus.REVIEWING:
+        if new_status == MaintenanceStatus.IN_REVIEW:
             if not (changed_by.has_role("landlord") or changed_by.has_role("agent")):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -554,7 +559,7 @@ class MaintenanceService:
         summary = {
             "total": 0,
             "reported": 0,
-            "reviewing": 0,
+            "in_review": 0,
             "assigned": 0,
             "acknowledged": 0,
             "in_progress": 0,

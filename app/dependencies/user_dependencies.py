@@ -11,6 +11,7 @@ from app.services.auth_service import AuthService
 from app.models.user import User
 from app.models.user import User
 from app.models.user_property import UserProperty, RelationshipType
+from app.models.maintenance import MaintenanceRequest, MaintenanceStatus
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -107,3 +108,29 @@ def get_current_admin_user(
             detail="Admin access required."
         )
     return current_user
+
+def get_current_staff_user(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Dependency that verifies the current user has the 'maintenance_staff' role 
+    in the UserProperty mapping table (across any property).
+    """
+    is_staff = db.query(UserProperty).filter(
+        UserProperty.user_id == current_user.id,
+        UserProperty.relationship_type == RelationshipType.MAINTENANCE_STAFF
+    ).first()
+    if not is_staff:
+        raise HTTPException(status_code=403, detail="Maintenance Staff access required")
+    return current_user
+
+def get_current_staff_tasks(current_user: User = Depends(get_current_staff_user), db: Session = Depends(get_db)):
+    """
+    Dependency that retrieves the current user's maintenance tasks.
+    """
+    return db.query(MaintenanceRequest).filter(
+        MaintenanceRequest.assigned_staff_id == current_user.id,
+        MaintenanceRequest.is_active == True,
+        MaintenanceRequest.status.in_([MaintenanceStatus.ASSIGNED, MaintenanceStatus.ACKNOWLEDGED, MaintenanceStatus.IN_PROGRESS])
+    ).all()

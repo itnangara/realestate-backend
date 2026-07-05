@@ -1,6 +1,6 @@
 # Start the backend server
 opt1: python main.py
-opt2: uvicorn main:app
+opt2: uvicorn main:app --reload
 
 # Real Estate Backend API
 

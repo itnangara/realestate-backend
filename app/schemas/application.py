@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, computed_field, model_validator, ConfigDi
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from app.models.application import ApplicationStatus
+from app.schemas.property import PropertyBriefSchema
+#from app.schemas.application import UserBriefSchema
 
 class ApplicationBase(BaseModel):
     """Base application schema"""
@@ -72,11 +74,30 @@ class ApplicationResponse(ApplicationBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+class UserBriefSchema(BaseModel):
+    """Safe user data for application details"""
+    id: int
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone_number: Optional[str] = None # Added for contact parity
+    avatar_url: Optional[str] = None   # Added for UI polish
+    roles: List[str] = []
+
+    # Handle null checks and string concatenation for the name (for frontend display).
+    @computed_field
+    @property
+    def full_name(self) -> str:
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        return self.first_name or self.last_name or self.email
+
+    model_config = ConfigDict(from_attributes=True)
+
 class ApplicationDetailResponse(ApplicationResponse):
     """Schema for application with related data"""
-    applicant: Optional[dict] = Field(None, description="Applicant user information")
-    property: Optional[dict] = Field(None, description="Property information")
-
+    applicant: Optional[UserBriefSchema] = Field(None, description="Applicant user information")
+    property: Optional[PropertyBriefSchema] = Field(None, description="Property information with owner context")
 
 class ApplicationListResponse(BaseModel):
     """
@@ -94,5 +115,7 @@ class ApplicationListResponse(BaseModel):
     page: int = Field(ge=1, description="Current page number (1-indexed)")
     limit: int = Field(ge=1, description="Items per page")
     pages: int = Field(ge=0, description="Total number of pages")
+    
+    status_counts: Optional[Dict[str, int]] = Field(default=None, description="Aggregated status counts for current filter (ignore pagination)")
     
     model_config = ConfigDict(from_attributes=True)

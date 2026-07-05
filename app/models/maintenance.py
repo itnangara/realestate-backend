@@ -11,14 +11,10 @@ from app.utils.database import Base
 from datetime import datetime, timezone
 import enum
 
-
 class MaintenanceStatus(str, enum.Enum):
     """Maintenance status enum - enterprise-grade unified workflow"""
     REPORTED = "REPORTED"  # Tenant submits request
-    
-    # TODO: Rename "REVIEWING" to "IN_REVIEW"
-
-    REVIEWING = "REVIEWING"  # Property Manager reviews
+    IN_REVIEW = "IN_REVIEW"  # Property Manager reviews
     ASSIGNED = "ASSIGNED"  # Manager assigns task
     ACKNOWLEDGED = "ACKNOWLEDGED"  # Staff acknowledges
     IN_PROGRESS = "IN_PROGRESS"  # Maintenance in progress
@@ -55,7 +51,7 @@ class MaintenanceRequest(Base):
     """
     Maintenance request model - enterprise-grade maintenance tracking
     
-    Workflow: REPORTED → REVIEWING → ASSIGNED → ACKNOWLEDGED → IN_PROGRESS → COMPLETED → VERIFIED → CLOSED
+    Workflow: REPORTED → IN_REVIEW → ASSIGNED → ACKNOWLEDGED → IN_PROGRESS → COMPLETED → VERIFIED → CLOSED
     """
     __tablename__ = "maintenance_requests"
 

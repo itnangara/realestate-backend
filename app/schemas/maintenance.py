@@ -9,7 +9,6 @@ from datetime import datetime
 from decimal import Decimal
 from app.models.maintenance import MaintenanceStatus, MaintenancePriority, MaintenanceCategory
 
-# 🟢 IMPORT NEW SCHEMA FILE
 from app.schemas.maintenance_staff import StaffUserSchema 
 
 # -----------------------------------------------
@@ -149,13 +148,13 @@ class MaintenanceRequestListResponse(BaseModel):
     page: int
     limit: int
     pages: int
-
+    status_counts: Dict[str, int]
 
 class MaintenanceRequestSummary(BaseModel):
     """Schema for maintenance request summary statistics"""
     total: int
     reported: int
-    reviewing: int
+    in_review: int
     assigned: int
     acknowledged: int
     in_progress: int

@@ -2,7 +2,7 @@
 
 Revision ID: 6edd2a26e8a0
 Revises: 
-Create Date: 2025-01-27 20:45:00.000000
+Create Date: 2025-11-27 20:45:00.000000
 
 """
 from typing import Sequence, Union
@@ -69,7 +69,7 @@ def upgrade() -> None:
         AND constraint_name = 'properties_owner_id_fkey'
     """))
     if result.fetchone():
-    op.drop_constraint('properties_owner_id_fkey', 'properties', type_='foreignkey')
+        op.drop_constraint('properties_owner_id_fkey', 'properties', type_='foreignkey')
     
     # Check for agent_id foreign key
     result = conn.execute(text("""
@@ -111,7 +111,7 @@ def upgrade() -> None:
         AND column_name = 'owner_id'
     """))
     if result.fetchone():
-    op.drop_column('properties', 'owner_id')
+        op.drop_column('properties', 'owner_id')
     
     # Check and drop agent_id
     result = conn.execute(text("""
@@ -121,7 +121,7 @@ def upgrade() -> None:
         AND column_name = 'agent_id'
     """))
     if result.fetchone():
-    op.drop_column('properties', 'agent_id')
+        op.drop_column('properties', 'agent_id')
 
 
 def downgrade() -> None:

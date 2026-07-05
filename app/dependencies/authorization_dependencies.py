@@ -121,7 +121,7 @@ def require_role(*roles: str):
 
 
 def staff_scope_check(
-    request_id: int,
+    id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> MaintenanceRequest:
@@ -142,7 +142,7 @@ def staff_scope_check(
     from app.services.maintenance_service import MaintenanceService
     
     service = MaintenanceService(db)
-    request = service.get_request_by_id(request_id)
+    request = service.get_request_by_id(id)
     
     if not request:
         raise HTTPException(

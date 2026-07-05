@@ -6,6 +6,8 @@ from pydantic import BaseModel, validator, root_validator, ConfigDict, Field, co
 from typing import Optional, List
 from datetime import datetime
 from app.models.property import PropertyType, PropertyStatus, ListingType
+from app.models.user_property import RelationshipType
+from typing import List as _List
 
 class PropertyBase(BaseModel):
     """Base property schema"""
@@ -106,6 +108,33 @@ class PropertyResponse(PropertyBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+# Lightweight property brief schema with ownership context
+class PropertyBriefSchema(BaseModel):
+    """Brief property information including owner_ids for ACL-aware frontend rendering"""
+    id: int
+    title: str
+    address: str
+    city: str
+    state: str
+    zip_code: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def owner_ids(self) -> _List[int]:
+        """
+        Compute the IDs of users who own or have landlord/agent/admin roles for this property.
+        Uses the unified user_properties relation (RelationshipType: LANDLORD, AGENT, ADMIN).
+        """
+        owner_ids: _List[int] = []
+        # Access related user_properties if loaded on the ORM object
+        for up in getattr(self, "user_properties", []) or []:
+            rt = getattr(up, "relationship_type", None)
+            rt_value = rt.value if hasattr(rt, "value") else rt
+            if isinstance(rt_value, str) and rt_value.upper() in {"LANDLORD", "AGENT", "ADMIN"}:
+                owner_ids.append(up.user_id)
+        return owner_ids
 # --- Production-Grade Advanced Search Schemas ---
 
 class PropertySearchFilters(BaseModel):

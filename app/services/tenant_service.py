@@ -3,16 +3,23 @@ Tenant service for tenant profile management
 """
 
 from sqlalchemy.orm import Session
-from typing import Optional
+from sqlalchemy import or_
+from typing import Optional, List, Dict, Any, TypedDict
 import json
 from fastapi import HTTPException, status
 from app.models.tenant_profile import TenantProfile
 from app.models.user import User
+from app.models.lease import Lease, LeaseStatus
+from app.models import UserProperty
+from app.models.property import Property
 from app.schemas.tenant import TenantProfileCreate, TenantProfileUpdate
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+class TenantSummaryResponse(TypedDict):
+    tenants: List[Dict[str, Any]]
+    stats: Dict[str, Any]
 
 class TenantService:
     """Service for tenant profile operations"""
@@ -136,3 +143,64 @@ class TenantService:
             # Create new
             return self.create_tenant_profile(user_id, profile_data)
 
+    def get_tenants_for_landlord(
+        self, 
+        landlord_id: int, 
+        status: str = None, 
+        search: str = None
+    ):
+        # 1. Base Query with Joins
+        # Join UserProperty to verify the landlord owns the property the tenant is in
+        query = self.db.query(User, Lease, Property, TenantProfile)\
+            .join(Lease, User.id == Lease.tenant_id)\
+            .join(Property, Lease.property_id == Property.id)\
+            .join(UserProperty, Property.id == UserProperty.property_id)\
+            .outerjoin(TenantProfile, User.id == TenantProfile.user_id)
+
+        # 2. Security: Filter by landlord ownership
+        query = query.filter(UserProperty.user_id == landlord_id)
+
+        # 3. Apply Filters
+        if status and status != "all":
+            query = query.filter(Lease.status == status)
+
+        if search:
+            search_filter = or_(
+                User.first_name.ilike(f"%{search}%"), 
+                User.last_name.ilike(f"%{search}%"), 
+                User.email.ilike(f"%{search}%"),
+                Property.title.ilike(f"%{search}%"),
+            )
+            query = query.filter(search_filter)
+
+        results = query.all()
+
+        tenants_list = []
+        total_revenue = 0
+
+        # 4. Transform Results
+        for user, lease, prop, profile in results:
+            if lease.status == LeaseStatus.COUNTER_SIGNED or lease.status == LeaseStatus.ACTIVE:
+                total_revenue += (lease.rent or 0)
+                print(f"Rent: {lease.rent}")
+
+            tenants_list.append({
+                "id": str(user.id),
+                "name": f"{user.first_name} {user.last_name}",
+                "email": user.email,
+                "phone": getattr(profile, 'phone_number', "N/A") if profile else "N/A",
+                "property_name": prop.title,
+                "rent_amount": float(lease.rent) if lease.rent else 0,
+                "lease_start": lease.start_date.isoformat() if lease.start_date else None, # Added
+                "lease_end": lease.end_date.isoformat() if lease.end_date else None,
+                "status": "active" if lease.status == "counter_signed" else lease.status,
+            })
+
+        return {
+            "tenants": tenants_list,
+            "stats": {
+                "total_active": len([t for t in tenants_list if t['status'] == 'active']),
+                "monthly_revenue": total_revenue,
+                "delinquent_count": 0 
+            }
+        }

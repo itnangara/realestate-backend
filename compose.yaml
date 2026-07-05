@@ -27,7 +27,7 @@ services:
       - POSTGRES_USER=inangara
       - POSTGRES_PASSWORD=pass
     ports:
-      - "5433:5432"
+      - "5439:5432"
     healthcheck:
       test: [ "CMD", "pg_isready", "-U", "inangara", "-d", "prod_real_estate_db" ]
       interval: 10s

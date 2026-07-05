@@ -33,7 +33,7 @@ def _build_staff_task_response(request: MaintenanceRequest, db: Session) -> dict
         "id": request.id,
         "title": request.title,
         "property_id": request.property_id,
-        "property_name": request.property.name if request.property else None,
+        "property_name": request.property.title if request.property else None,
         "unit_number": request.unit_number,
         "status": request.status,
         "priority": request.priority,

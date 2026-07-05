@@ -220,7 +220,7 @@ def get_maintenance_staff(
     "",
     response_model=MaintenanceRequestListResponse,
     summary="List maintenance requests",
-    response_description="Paginated list of maintenance requests with filters"
+    response_description="Paginated list of maintenance requests with filters and status counts"
 )
 async def list_maintenance_requests(
     status: Optional[MaintenanceStatus] = Query(None, description="Filter by status"),
@@ -234,16 +234,11 @@ async def list_maintenance_requests(
     db: Session = Depends(get_db)
 ):
     """
-    List maintenance requests with role-based filtering.
-    
-    **Role-based filtering:**
-    - Tenant: Only their own requests
-    - Landlord/Agent: Requests for their properties
-    - Staff: Assigned requests
-    - Admin: All requests
+    List maintenance requests with role-based filtering and dynamic status counts.
     """
     service = MaintenanceService(db)
-    requests, total = service.list_requests(
+    
+    requests, total, status_counts = service.list_requests(
         user=current_user,
         status=status,
         property_id=property_id,
@@ -264,9 +259,9 @@ async def list_maintenance_requests(
         total=total,
         page=page,
         limit=limit,
-        pages=pages
+        pages=pages,
+        status_counts=status_counts
     )
-
 
 @router.get(
     "/{request_id}",

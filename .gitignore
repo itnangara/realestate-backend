@@ -159,3 +159,21 @@ temp/
 .cursorrules
 env.example
 *.example
+.pyc
+.log
+.tmp
+
+# Other
+__pycache__/
+*.pyc
+*.log
+.venv/
+node_modules/
+dist/
+build/
+.next/
+coverage/
+logs/
+data/
+pgdata/
+docker-data/

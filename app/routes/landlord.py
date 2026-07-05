@@ -11,6 +11,7 @@ Endpoints:
 - POST /api/landlord/applications/{id}/request-info - Request more information (reviewed → needs_info)
 - POST /api/landlord/applications/{id}/sign - Sign lease
 - POST /api/landlord/applications/{id}/activate - Activate lease
+- GET /api/landlord/tenants - Get tenants for landlord
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -20,8 +21,9 @@ from datetime import datetime
 import math
 
 from app.utils.database import get_db
-from app.schemas.application import ApplicationResponse, ApplicationListResponse
+from app.schemas.application import ApplicationResponse, ApplicationListResponse, ApplicationDetailResponse
 from app.services.application_service import ApplicationService
+from app.services.tenant_service import TenantService
 from app.models.application import ApplicationStatus
 from app.models.property import Property
 from app.dependencies.user_dependencies import get_current_user
@@ -81,33 +83,16 @@ async def get_landlord_applications(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Get filtered and paginated applications for properties owned/managed by the authenticated landlord.
-    
-    **Authorization:**
-    - Landlord/agent role required
-    - Returns only applications for properties where user has LANDLORD relationship (via user_properties table)
-    
-    **Filters (all use AND logic):**
-    - status: EXACT match on application status
-    - property_id: Filter by specific property
-    - applicant_id: Filter by specific applicant (landlord-only)
-    - date_from: Applications created on or after this date
-    - date_to: Applications created on or before this date
-    - search: Numeric search across application ID, property ID, and applicant ID
-    
-    **Pagination:**
-    - page: Page number (default 1)
-    - limit: Items per page (default 20, max 100)
-    """
     if not (current_user.has_role("landlord") or current_user.has_role("agent")):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=403,
             detail="Landlord or agent role required"
         )
     
     service = ApplicationService(db)
-    items, total = service.get_filtered_applications(
+    
+    # UNPACKING 3 VALUES: items, total, AND status_counts
+    items, total, status_counts = service.get_filtered_applications(
         landlord_id=current_user.id,
         status=status,
         property_id=property_id,
@@ -124,15 +109,15 @@ async def get_landlord_applications(
     return ApplicationListResponse(
         items=[ApplicationResponse.model_validate(a) for a in items],
         total=total,
+        status_counts=status_counts,  # 👈 This feeds your Frontend Chips
         page=page,
         limit=limit,
         pages=pages
     )
 
-
 @router.get(
     "/applications/{application_id}",
-    response_model=ApplicationResponse,
+    response_model=ApplicationDetailResponse,
     summary="Get landlord application by ID",
     response_description="Application details",
     tags=["Applications"]
@@ -178,7 +163,7 @@ async def get_landlord_application(
             detail="Not enough permissions - you don't own this property"
         )
     
-    return ApplicationResponse.model_validate(app)
+    return ApplicationDetailResponse.model_validate(app)
 
 
 @router.get(
@@ -579,3 +564,32 @@ async def activate_lease(
     activated_app = service.activate_lease(application_id, current_user.id)
     return ApplicationResponse.model_validate(activated_app)
 
+@router.get("/tenants")
+async def get_landlord_tenants(
+    status: str = Query("all"),
+    search: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    service = TenantService(db)
+    
+    # 1. Permission Check
+    if "landlord" not in getattr(current_user, "roles", []):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # 2. The Try Block (Works perfectly with async)
+    try:
+        # Note: Unless your service uses an AsyncSession, 
+        # you don't 'await' this call. It just runs inside the async context.
+        return service.get_tenants_for_landlord(
+            landlord_id=current_user.id,
+            status=status,
+            search=search
+        )
+    except Exception as e:
+        print(f"Error fetching tenants: {e}")
+        # Always use a specific status code and clear message for Enterprise apps
+        raise HTTPException(
+            status_code=500, 
+            detail="A database error occurred while retrieving tenants."
+        )

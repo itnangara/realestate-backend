@@ -2,9 +2,9 @@
 Application service for business logic
 """
 
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_
-from typing import List, Optional, Tuple
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, and_, func
+from typing import List, Optional, Tuple, Dict
 from datetime import datetime, timezone
 import json
 import math
@@ -47,9 +47,21 @@ class ApplicationService:
         return app
 
     def get_application_by_id(self, application_id: int) -> Optional[Application]:
-        app = self.db.query(Application).filter(Application.id == application_id).first()
+        app = self.db.query(Application).options(
+            # Chain 1: Property -> Landlord info
+            joinedload(Application.property)
+                .joinedload(Property.user_properties)
+                .joinedload(UserProperty.user),
+            
+            # Chain 2: Applicant -> Tenant Profile info
+            joinedload(Application.applicant)
+                .joinedload(User.tenant_profile)
+        ).filter(Application.id == application_id).first()
+
         if app:
+            # All normalization logic
             app = self._normalize_documents_urls(app)
+            
         return app
 
     def get_user_applications(self, user_id: int) -> List[Application]:
@@ -77,115 +89,87 @@ class ApplicationService:
         search: Optional[str] = None,
         page: int = 1,
         limit: int = 20
-    ) -> Tuple[List[Application], int]:
+    ) -> Tuple[List[Application], int, Dict[str, int]]:
         """
-        Enterprise-grade filtered application retrieval with pagination.
-        
-        **Shared filter logic for both tenant and landlord endpoints.**
-        
-        Args:
-            user_id: Filter by applicant_id (for tenant endpoint)
-            landlord_id: Filter by property owner (for landlord endpoint)
-            status: EXACT match on application status
-            property_id: Filter by property ID
-            applicant_id: Filter by applicant ID (landlord-only)
-            date_from: Filter by created_at >= date_from
-            date_to: Filter by created_at <= date_to
-            search: Numeric search across id, property_id, applicant_id (landlord only)
-            page: Page number (1-indexed, default 1)
-            limit: Items per page (default 20)
-            
-        Returns:
-            Tuple of (applications_list, total_count)
-            
-        **Enterprise-grade features:**
-        - All filters use AND logic (no filter overrides another)
-        - Search is numeric and exact (no fuzzy matching)
-        - Count is calculated BEFORE pagination (accurate totals)
-        - Efficient SQLAlchemy query building
+        Enterprise-grade filtered applications retrieval with full status padding.
         """
-        # Step 1: Start with base query
-        query = self.db.query(Application).filter(Application.is_active == True)
-        
-        # Step 2: Apply user/landlord scope filters
+        # 1. Base Query & Eager Loading
+        query = self.db.query(Application).options(
+            joinedload(Application.property).joinedload(Property.user_properties).joinedload(UserProperty.user),
+            joinedload(Application.applicant).joinedload(User.tenant_profile)
+        ).filter(Application.is_active == True)
+
+        # 2. Scope Filtering
         if user_id:
-            # Tenant endpoint: only their applications
             query = query.filter(Application.applicant_id == user_id)
-        
-        if landlord_id:
-            # Landlord endpoint: only applications for their properties
-            # Enterprise-grade: Use unified user_properties table exclusively
-            from sqlalchemy import union_all, select
             
-            # Get property IDs from user_properties (LANDLORD relationship)
+        if landlord_id:
             landlord_property_ids = [
-                up.property_id for up in self.db.query(UserProperty)
+                up.property_id for up in self.db.query(UserProperty.property_id)
                 .filter(
                     UserProperty.user_id == landlord_id,
                     UserProperty.relationship_type == RelationshipType.LANDLORD
                 ).all()
             ]
-            
-            # Enterprise-grade: Use unified model exclusively
-            property_ids = landlord_property_ids
-            if property_ids:
-                query = query.filter(Application.property_id.in_(property_ids))
+            if landlord_property_ids:
+                query = query.filter(Application.property_id.in_(landlord_property_ids))
             else:
-                # No properties owned by landlord, return empty result
-                query = query.filter(Application.id == -1)  # Impossible condition
-        
-        # Step 3: Apply standard filters (AND logic)
+                query = query.filter(Application.id == -1)
+
+        # 3. Dynamic Filters (AND logic)
         if status:
-            # Enterprise-grade: EXACT match, not partial
             query = query.filter(Application.status == status)
-        
         if property_id:
             query = query.filter(Application.property_id == property_id)
-        
         if applicant_id:
-            # Landlord-only filter
             query = query.filter(Application.applicant_id == applicant_id)
-        
         if date_from:
             query = query.filter(Application.created_at >= date_from)
-        
         if date_to:
             query = query.filter(Application.created_at <= date_to)
-        
-        # Step 4: Implement search (numeric, exact match)
-        if search:
-            if search.strip().isdigit():
-                search_num = int(search.strip())
-                # Build OR conditions for search
-                search_conditions = [
-                    Application.id == search_num,
-                    Application.property_id == search_num
-                ]
-                # Add applicant_id search for landlord endpoint
-                if landlord_id is not None:
-                    search_conditions.append(Application.applicant_id == search_num)
-                
-                query = query.filter(or_(*search_conditions))
-            # If search is not numeric, ignore it (graceful fallback)
-        
-        # Step 5: Count BEFORE pagination (enterprise-grade)
+            
+        # 4. Numeric Search
+        if search and search.strip().isdigit():
+            search_num = int(search.strip())
+            search_conditions = [
+                Application.id == search_num,
+                Application.property_id == search_num
+            ]
+            if landlord_id is not None:
+                search_conditions.append(Application.applicant_id == search_num)
+            query = query.filter(or_(*search_conditions))
+
+        # 5. Calculate Metrics (Before Pagination)
         total = query.count()
         
-        # Step 6: Apply pagination
+        # This ensures the frontend chips always have a number to display.
+        status_counts: Dict[str, int] = {s.value: 0 for s in ApplicationStatus}
+        status_counts["all"] = int(total)
+
+        # Query only the counts for the filtered set
+        db_counts = query.with_entities(
+            Application.status, 
+            func.count(Application.id)
+        ).group_by(Application.status).all()
+
+        for st, c in db_counts:
+            key = st.value if hasattr(st, "value") else str(st)
+            status_counts[str(key)] = int(c)
+
+        # 6. Pagination & Execution
         offset = (page - 1) * limit
         items = query.order_by(Application.created_at.desc()).offset(offset).limit(limit).all()
         
-        # Normalize documents URLs for all items
         normalized_items = [self._normalize_documents_urls(app) for app in items]
         
-        return normalized_items, total
-    
+        return normalized_items, total, status_counts
+        
     def get_tenant_leases(self, user_id: int) -> List[Application]:
         """
         Get tenant's leases (applications with SIGNED or ACTIVE_LEASE status).
         
-        Enterprise-grade: Returns only active leases for the authenticated tenant.
-        """
+        Enterprise-grade: Returns only active leases for the authenticated tenant.        """
+
         leases = self.db.query(Application).filter(
             Application.applicant_id == user_id,
             Application.is_active == True,
@@ -1186,4 +1170,3 @@ class ApplicationService:
         )
         
         return self._normalize_documents_urls(app)
-

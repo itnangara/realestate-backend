@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+import math
 
 from app.utils.date_utils import parse_date_query_param
 
@@ -335,89 +336,50 @@ async def terminate_lease(
     
     return LeaseResponse.model_validate(lease)
 
-
 @router.get(
-    "/landlord/leases",
-    response_model=List[LeaseResponse],
-    summary="Get landlord's leases",
-    response_description="List of all leases for the authenticated landlord"
+    "", # /api/leases
+    response_model=LeaseListResponse,
+    summary="List leases with counts",
+    response_description="Paginated list of leases with dynamic status counts"
 )
-async def get_landlord_leases(
-    status: Optional[LeaseStatus] = None,
+async def list_leases(
+    status: Optional[LeaseStatus] = Query(None),
+    property_id: Optional[int] = Query(None),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get all leases for the authenticated landlord.
-    
-    **Authorization:**
-    - Landlord/agent role required
-    - Returns only leases where landlord_id = current_user.id
+    Unified lease listing. Automatically detects if user is 
+    a Landlord, Tenant, or Admin and filters visibility accordingly.
     """
-    if not (current_user.has_role("landlord") or current_user.has_role("agent")):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Landlord or agent role required"
-        )
-    
     service = LeaseService(db)
-    leases = service.get_landlord_leases(current_user.id, status)
     
-    return [LeaseResponse.model_validate(lease) for lease in leases]
-
-
-@router.get(
-    "/tenant/leases",
-    response_model=List[LeaseResponse],
-    summary="Get tenant's leases",
-    response_description="List of all leases for the authenticated tenant with optional filtering"
-)
-async def get_tenant_leases(
-    status: Optional[LeaseStatus] = Query(None, description="Filter by lease status"),
-    property_id: Optional[int] = Query(None, description="Filter by property ID"),
-    date_from: Optional[datetime] = Query(None, description="Filter leases starting from date (ISO 8601)"),
-    date_to: Optional[datetime] = Query(None, description="Filter leases ending before date (ISO 8601)"),
-    search: Optional[str] = Query(None, description="Search by property title or address"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get all leases for the authenticated tenant with optional filtering.
-    
-    **Authorization:**
-    - Tenant role required
-    - Returns only leases where tenant_id = current_user.id
-    - DRAFT leases are always excluded (tenants cannot see drafts)
-    
-    **Filtering:**
-    - status: Filter by lease status (SENT, SIGNED, COUNTER_SIGNED, ACTIVE, TERMINATED, CANCELLED)
-    - property_id: Filter by specific property
-    - date_from: Filter leases with start_date >= date_from (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
-    - date_to: Filter leases with end_date <= date_to (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
-    - search: Search by property title or address (case-insensitive)
-    
-    **Date Format:**
-    - FastAPI automatically parses ISO 8601 dates from query parameters
-    - Supports both date-only (YYYY-MM-DD) and datetime (YYYY-MM-DDTHH:MM:SS) formats
-    """
-    if not current_user.has_role("tenant"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant role required"
-        )
-    
-    service = LeaseService(db)
-    leases = service.get_tenant_leases(
-        tenant_id=current_user.id,
+    items, total, status_counts = service.list_leases(
+        user=current_user,
         status=status,
         property_id=property_id,
         date_from=date_from,
         date_to=date_to,
-        search=search
+        search=search,
+        page=page,
+        limit=limit
     )
     
-    return [LeaseResponse.model_validate(lease) for lease in leases]
-
+    pages = math.ceil(total / limit) if total > 0 else 0
+    
+    return LeaseListResponse(
+        items=[LeaseResponse.model_validate(i) for i in items],
+        total=total,
+        page=page,
+        limit=limit,
+        pages=pages,
+        status_counts=status_counts
+    )
 
 @router.get(
     "/properties/{property_id}/leases",

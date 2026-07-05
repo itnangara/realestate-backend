@@ -4,9 +4,9 @@ Enterprise-grade business logic with proper validation and audit logging
 """
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func, desc
 from fastapi import HTTPException, status
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from datetime import datetime, timezone
 from decimal import Decimal
 import asyncio
@@ -731,59 +731,68 @@ class LeaseService:
         
         return lease
     
-    def get_landlord_leases(self, landlord_id: int, status: Optional[LeaseStatus] = None) -> List[Lease]:
-        """Get all leases for a landlord"""
-        query = self.db.query(Lease).filter(Lease.landlord_id == landlord_id)
-        
-        if status:
-            query = query.filter(Lease.status == status)
-        
-        return query.order_by(Lease.created_at.desc()).all()
-    
-    def get_tenant_leases(
+    def list_leases(
         self,
-        tenant_id: int,
+        user: User,
+        tab: Optional[str] = "current",
         status: Optional[LeaseStatus] = None,
         property_id: Optional[int] = None,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
-        search: Optional[str] = None
-    ) -> List[Lease]:
+        search: Optional[str] = None,
+        page: int = 1,
+        limit: int = 20
+    ) -> Tuple[List[Lease], int, Dict[str, int]]:
         """
-        Get all leases for a tenant with optional filtering.
-        
-        **Enterprise-grade business rules:**
-        - Tenants should NOT see DRAFT leases (only landlord can see drafts)
-        - Tenants can see: SENT, SIGNED, COUNTER_SIGNED, ACTIVE, TERMINATED, CANCELLED
-        - This ensures tenants only see leases that have been sent to them
-        
-        **Filtering:**
-        - status: Filter by lease status
-        - property_id: Filter by specific property
-        - date_from: Filter leases with start_date >= date_from
-        - date_to: Filter leases with end_date <= date_to
-        - search: Search by property title or address (case-insensitive)
+        Enterprise-grade lease listing with role-based visibility and status padding.
         """
-        query = self.db.query(Lease).filter(Lease.tenant_id == tenant_id)
-        
-        # FLOW COMPLIANCE: Filter out DRAFT leases for tenants
-        # Tenants should only see leases that have been sent to them
-        query = query.filter(Lease.status != LeaseStatus.DRAFT)
-        
+        print(f"tab: {tab}")
+        query = self.db.query(Lease)
+
+        # Role-based Scope & Visibility Rules
+        if user.has_role("tenant"):
+            query = query.filter(Lease.tenant_id == user.id)
+            # BUSINESS RULE: Tenants NEVER see DRAFT leases
+            query = query.filter(Lease.status != LeaseStatus.DRAFT)
+        elif user.has_role("landlord"):
+            query = query.filter(Lease.landlord_id == user.id)
+        # Add other roles (agent/admin) as needed...
+
+        # 2. TAB LOGIC (Crucial: This filters the base query BEFORE pagination)
+        # If no explicit status is provided, apply tab-based filtering
+        if status is None:
+            if tab == "current":
+                query = query.filter(Lease.status.in_([
+                    LeaseStatus.SENT,
+                    LeaseStatus.SIGNED,
+                    LeaseStatus.COUNTER_SIGNED,
+                    LeaseStatus.ACTIVE
+                ]))
+            elif tab == "history":
+                print("history")
+                query = query.filter(Lease.status.in_([
+                    # LeaseStatus.EXPIRED, TODO: Add this back in when we have a way to handle expired leases
+                    LeaseStatus.TERMINATED,
+                    LeaseStatus.CANCELLED
+                ]))
+
+        # 3. Specific Status Refinement (If user clicks a Chip)
         if status:
             query = query.filter(Lease.status == status)
-        
+
+        # 4. Dynamic Filters
         if property_id:
             query = query.filter(Lease.property_id == property_id)
-        
-        if date_from:
-            query = query.filter(Lease.start_date >= date_from)
-        
-        if date_to:
-            query = query.filter(Lease.end_date <= date_to)
-        
+
+        if date_from or date_to:
+            if date_from and date_to:
+                query = query.filter(Lease.start_date <= date_to, Lease.end_date >= date_from)
+            elif date_from:
+                query = query.filter(Lease.end_date >= date_from)
+            elif date_to:
+                query = query.filter(Lease.start_date <= date_to)
+
         if search:
-            # Join with Property table for search
             query = query.join(Property).filter(
                 or_(
                     Property.title.ilike(f"%{search}%"),
@@ -791,9 +800,36 @@ class LeaseService:
                     Property.city.ilike(f"%{search}%")
                 )
             )
+
+        # Calculate Metrics (The Source of Truth)
+        total = query.count()
         
-        return query.order_by(Lease.created_at.desc()).all()
-    
+        # ARCHITECT'S PAD: Initialize all possible statuses from LeaseStatus Enum
+        status_counts: Dict[str, int] = {s.value: 0 for s in LeaseStatus}
+        
+        # Adjust pad for Tenants (remove DRAFT from their UI counts)
+        if user.has_role("tenant") and "draft" in status_counts:
+            del status_counts["draft"]
+            
+        status_counts["all"] = int(total)
+
+        # Get status grouping from DB
+        db_counts = query.with_entities(
+            Lease.status, 
+            func.count(Lease.id)
+        ).group_by(Lease.status).all()
+
+        for st, c in db_counts:
+            key = st.value if hasattr(st, "value") else str(st)
+            if str(key) in status_counts:
+                status_counts[str(key)] = int(c)
+
+        # Pagination
+        offset = (page - 1) * limit
+        items = query.order_by(desc(Lease.created_at)).offset(offset).limit(limit).all()
+
+        return items, total, status_counts
+
     def get_property_leases(self, property_id: int) -> List[Lease]:
         """Get all leases for a property"""
         return self.db.query(Lease).filter(

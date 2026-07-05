@@ -201,4 +201,5 @@ class LeaseListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+    status_counts: Dict[str, int]
 
